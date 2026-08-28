@@ -1,0 +1,31 @@
+services:
+  db:
+    image: mariadb:11
+    env_file: .env
+    environment:
+      MARIADB_DATABASE: ul_fitness
+    volumes:
+      - db-data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306" # LAN only, nicht public; via ai-vm lokal
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  api:
+    build: ./server
+    env_file: .env
+    environment:
+      DB_URL: jdbc:mariadb://db:3306/ul_fitness
+      PORT: 8080
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080" # via LXC Subnet (Tailnet), kein public Forward; ai-vm:8080 nur im Tailnet
+    restart: unless-stopped
+
+volumes:
+  db-data:

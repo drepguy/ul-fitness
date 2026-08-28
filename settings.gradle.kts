@@ -24,4 +24,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "ul-fitness"
 include(":app")
+include(":shared")
+include(":server")
  
