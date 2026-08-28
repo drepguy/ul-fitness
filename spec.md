@@ -1,7 +1,7 @@
 # UL Fitness — Spec
 
-**Version:** 0.3 — 2026-08-30  
-**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI German, KG, `exercise_aliases`)  
+**Version:** 0.4 — 2026-08-30  
+**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
 ---
@@ -32,8 +32,8 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 
 ## 3. Users
 
-- **Owner (you):** daily driver, defines custom exercises, wants volume/PRs.
-- **Future user:** invited friend, isolated data via `user_id`; same UX, no data leakage.
+- **Owner (you):** daily driver, defines custom exercises, wants volume/PRs. **v1: nur du** (kein Invite, `POST /auth/register` deaktiviert nach initialem Seed).
+- **Future user:** schema bereits `user_id`-isoliert; Einladung später via `register` wieder öffnen — kein Umbau nötig.
 
 ## 4. Tech Stack
 
@@ -150,6 +150,28 @@ CREATE TABLE exercise_aliases (
   UNIQUE KEY uq_alias(alias, exercise_id),
   INDEX idx_alias(alias)
 );
+CREATE TABLE workout_templates (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  gym_id BIGINT NOT NULL,
+  name VARCHAR(120) NOT NULL, -- z.B. "Thomas Upper — Standard"
+  created_at DATETIME(6) NOT NULL,
+  updated_at DATETIME(6) NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (gym_id) REFERENCES gyms(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_template_user_gym_name(user_id, gym_id, name)
+);
+CREATE TABLE workout_template_exercises (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  template_id BIGINT NOT NULL,
+  exercise_id BIGINT NOT NULL,
+  order_idx INT NOT NULL,
+  default_sets INT NOT NULL DEFAULT 3,
+  default_reps INT NULL, -- optional Vorgabe
+  default_weight_kg DECIMAL(5,2) NULL,
+  FOREIGN KEY (template_id) REFERENCES workout_templates(id) ON DELETE CASCADE,
+  FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE
+);
 -- V2 candidate: body_metrics(id,user_id,date,weight_kg,body_fat)
 -- seed in V1 (2 gyms + canonical machines/exercises derived from real logs 2025-2026):
 -- gyms: Thomas Sport Center (Upper), All Inclusive Fitness (Legs/Core)
@@ -181,8 +203,8 @@ CREATE TABLE exercise_aliases (
 
 ## 7. API (Ktor, `/api/v1`, JSON, JWT bearer except `/health`, `/auth/*`)
 
-**Auth**
-- `POST /auth/register {email,password}` → `201 {id}` (invite-only; could disable after initial)
+**Auth** — v1: **nur du**, `register` nach Seed deaktiviert (per `ALLOW_REGISTER=false` env)
+- `POST /auth/register {email,password}` → `201 {id}` / `403` wenn deaktiviert (nur initial)
 - `POST /auth/login {email,password}` → `200 {accessToken, refreshToken, expiresIn}`
 - `POST /auth/refresh {refreshToken}` → `200 {accessToken}`
 
@@ -207,6 +229,14 @@ CREATE TABLE exercise_aliases (
 - `PATCH /workouts/{id}/finish {ended_at}` / `PATCH /workouts/{id} {gym_id, notes}` (pre-finish)
 - `DELETE /workouts/{id}`
 
+**Templates** (beides: letztes Training + Vorlagen — per Entscheidung)
+- `GET /templates?gymId=` → `[{id,name,gym_id, exercises:[{exerciseId,name,order_idx,default_sets}]}]`
+- `POST /templates {gym_id, name, exercises:[{exerciseId, order_idx, default_sets?, default_reps?, default_weight_kg?}]}` → `201`
+- `PUT /templates/{id} {name, exercises[...]}` → `200`
+- `DELETE /templates/{id}` → `204`
+- `POST /templates/{id}/start` → `201 {workoutId}` — legt neues `workouts` aus Vorlage an (kopiert Reihenfolge)
+- `POST /workouts/from-last {gym_id}` → `201 {workoutId}` — kopiert letztes Training dieses Studios (falls keine Vorlage)
+
 **Stats** (gym-aware)
 - `GET /stats/progress?exerciseId=&gymId=&period=90d&metric=e1RM|volume|max` → `[{date, value, reps, weight_kg}]` (`e1RM = weight*(1+reps/30)` Epley; volume = Σ `reps*weight`) — `gymId` optional filter.
 - `GET /stats/prs?exerciseId=&gymId=` → `{maxWeight:{value,date,gym}, maxE1RM:{}, maxVolume:{}}`
@@ -221,7 +251,8 @@ CREATE TABLE exercise_aliases (
 3. **Home** — Gym-Schnellwahl (`Thomas Sport Center` / `All Inclusive Fitness` Chips, plus `+` neues Studio), CTA `Training starten`, letzte Trainings nach Studio gruppiert, letzter PR.
 4. **Training (Fokus)** — *Einfachheit während des Trainings ist #1:*
    - **Studio-Wahl (erster Schritt):** `Training starten` → Studio wählen (Thomas / All Inclusive / weiter angelegtes). Setzt `workouts.gym_id`, filtert Maschinen. Vor erstem Satz änderbar. Merkt letztes Studio.
-   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` öffnet Sheet: Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. Liste zeigt `Art`-Badge (Gerät vs Freihantel). Alias-Suche findet `Hackschmitt`. Inline `+ Neu anlegen` → Dialog `Name, Kategorie (Push/Pull/Beine/Core...), Art (Freihantel/Gerät/Kabelzug/Eigengewicht), Studio (vorausgefüllt, änderbar), Aliase?` → `POST /exercises`. Optimistisch lokal, Sync-Queue.
+   - **Vorlage/Letztes:** Nach Studio-Wahl Sheet: `Letztes Training kopieren` (befüllt Reihenfolge aus `GET /workouts?gymId=…&limit=1`) **oder** gespeicherte `Vorlagen` dieses Studios (z. B. `Upper Standard`, Chips) → `POST /templates/{id}/start`. Falls keine: `Leer starten`.
+   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` öffnet Sheet: Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. Liste zeigt `Art`-Badge (Gerät vs Freihantel). Alias-Suche findet `Hackschmitt`. Inline `+ Neu anlegen` → Dialog `Name, Kategorie (Push/Pull/Beine/Core...), Art (Freihantel/Gerät/Kabelzug/Eigengewicht), Studio (vorausgefüllt, änderbar), Aliase?` → `POST /exercises`. Optimistisch lokal, Sync-Queue. `Vorlage speichern` Button speichert aktuelle Reihenfolge als neue Vorlage.
    - Pro Übung: vorheriger Satz als Geist (Tippen = Gewicht kopieren), Wiederholungs-Stepper `−/ +` (groß 56dp), Gewichts-Chips `−2,5/ +2,5 / +5` (**KG**, Komma), Numpad-Fallback, `RPE 1-10` Slider (Ticks 1-10, Label `Leicht…Limit`) + `Muskelversagen` Checkbox, pro Satz `Notiz` (aufklappbares Textfeld), `Satz speichern` Haptik. Parser akzeptiert `12x35kg` **oder** Slider.
    - Pausentimer: rund `Vico`/`CircularProgress`, `90s` Default (pro Übung gemerkt), Benachrichtigung `+30s / Überspringen` (`POST_NOTIFICATIONS` SDK 37), startet automatisch nach Log, Vibration bei 0.
    - Swipe zwischen Übungen, sticky Header `Studio • Übung`.
@@ -265,9 +296,9 @@ CREATE TABLE exercise_aliases (
 - **Not runnable elsewhere:** Ohne aktives Tailnet + genehmigte Subnet-Route ist `ai-vm:8080` nicht routbar — genau private-only. Kein Funnel/Serve nötig weil kein Daemon auf ai-vm.
 - **Secrets:** `.env` (`JWT_SECRET`, `MARIADB_ROOT_PASSWORD`) gitignored (`.gitignore` + `.env`).
 
-## 12. Deployment (ai-vm, Docker)
+## 12. Deployment (ai-vm, Docker) — per Entscheidung `~/ul-fitness`
 
-**Host:** Ubuntu + Docker already. Single `docker-compose.yml` at `~/ul-fitness/` (or `/opt/ul-fitness`).
+**Host:** Ubuntu + Docker bereits vorhanden. Single `docker-compose.yml` unter **`~/ul-fitness`** (per `ssh ulrich@ai-vm` — einfach, kein `sudo`/`/opt`).
 
 ```yaml
 services:
@@ -288,7 +319,7 @@ services:
 volumes: { db-data: {} }
 ```
 
-**TLS:** Kein `tailscale serve` auf `ai-vm` möglich (kein Daemon) → **HTTP im Tailnet** (WireGuard verschlüsselt) genügt. Optional Caddy mit self-signed `https://ai-vm` wenn gewünscht.
+**TLS:** Kein `tailscale serve` auf `ai-vm` möglich (kein Daemon) → **HTTP im Tailnet** (WireGuard verschlüsselt) genügt per Entscheidung. Optional Caddy self-signed später.
 
 **Deploy:**
 ```bash
@@ -301,7 +332,7 @@ curl http://ai-vm:8080/api/v1/health # {"status":"ok"}  # nur im Tailnet/Subnet
 # vom Handy (Tailnet an, Subnet genehmigt): http://ai-vm:8080/api/v1/health
 ```
 
-**Backup:** `docker exec ul-fitness-db-1 mariadb-dump ul_fitness | gzip > backup.sql.gz` (cron weekly to ai-vm volume).
+**Backup:** `docker exec ul-fitness-db-1 mariadb-dump ul_fitness | gzip > backup.sql.gz` (**wöchentlich** per `cron` auf `ai-vm`, per Entscheidung — z. B. `crontab -e` → `0 3 * * 0 docker exec ...`).
 
 ## 13. Build & Run (dev)
 
@@ -343,21 +374,22 @@ iOS/Desktop targets (KMP ready but ungenerated), body-metrics, CSV export, routi
 ## 17. Decisions Log
 
 - RPE `1-10` (user: `1-10`), `is_failure` separate. Covers warm-up to limit. Per-set `is_warmup` added for logs like `0 und 15kg warmup`.
-- Multi-user from schema start (FK `user_id`).
-- Tailscale over new WireGuard/OpenVPN (existing advertiser).
+- Multi-user from schema start (FK `user_id`), v1 aber **nur du** ( `ALLOW_REGISTER=false` ).
+- Tailscale over new WireGuard/OpenVPN (existing advertiser); `ai-vm` kein Daemon — LXC Subnet-Router reicht, `http://ai-vm:8080`.
 - KMP + Ktor per user choice (shared Kotlin, no FastAPI).
 - Vico over MPAndroidChart (CMP).
 - **Gyms first-class (2026-08-29):** `gyms` table, seed `Thomas Sport Center` (Upper) + `All Inclusive Fitness` (Legs/Core) as `is_system`. `exercises.gym_id NULL` = global free-weight, otherwise machine tied to one gym (user wants to choose per-gym machines or create new). `workouts.gym_id` required. Picker filters `global + this-gym machines`, API validates mismatch. Covers your current 2-gym split but extensible N.
-- **Machine/exercise input from real logs (2026-08-29):** See Appendix 19; decimal `47,5` comma, `body` weight, `y` typo handling → parser + seed aliases.
+- **Machine/exercise input from real logs (2026-08-29):** See Appendix 19; decimal `47,5` comma, `body` weight (ignoriert), `y` typo handling → parser + `exercise_aliases` Tabelle.
+- **Restliche Fragen 2026-08-30:** Deploy `~/ul-fitness` (einfach, `ssh ulrich@ai-vm`), Auth nur du v1, Vorlagen **beides** (letztes kopieren + gespeicherte `workout_templates` je Studio), TLS **HTTP** im Tailnet + **wöchentliches Backup**.
 
 ## 18. Phases
 
-- **P0 (0.5d):** Confirm MagicDNS name, `docker-compose.yml` health, `GET /health` over Tailnet.
-- **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id + sets.is_warmup), seed `Thomas Sport Center` / `All Inclusive Fitness` + system exercises/machines derived from Appendix 19, JWT, gym/exercise/workout CRUD with warmup/bodyweight support.
-- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms+migrations), Workout screen with **gym picker → exercise/machine picker (filtered) + inline create** + quick `reps×weight` parser (comma/dot, body) + rest timer + RPE 1-10.
-- **P3 (1d):** `SyncWorker`, MagicDNS `BuildConfig`, offline banner.
-- **P4 (1.5d):** Vico progress + PRs with **gym filter** (warmup excluded from PR/e1RM).
-- **P5 (0.5d):** Bind-to-tailnet, pinning, signing, `AGENTS.md` update (add `shared`/`server`, deploy cmd).
+- **P0 (0.5d):** Subnet-Route `192.168.x.0/24` in LXC approved, `docker-compose.yml` in `~/ul-fitness` health, `GET http://ai-vm:8080/api/v1/health` über Tailnet.
+- **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id + sets.is_warmup + exercise_aliases + workout_templates), seed `Thomas Sport Center` / `All Inclusive Fitness` + Aliase + Maschinen aus Anhang 19, JWT (nur du, `ALLOW_REGISTER=false`), gym/exercise/workout/template CRUD.
+- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms/aliases/templates), Trainingsscreen **Gym → Vorlage/Letztes → Übungs-Picker + inline anlegen** + `reps×weight` Parser (Komma) + Pausentimer + RPE 1-10 (Deutsch).
+- **P3 (1d):** `SyncWorker`, `BuildConfig http://ai-vm:8080`, Offline-Banner.
+- **P4 (1.5d):** Vico Fortschritt + PRs mit Studio-Filter (Warmup/Bodyweight ausgeschlossen).
+- **P5 (0.5d):** LAN-only, `network_security_config.xml` für `http://ai-vm`, Signing, `AGENTS.md` Update (Module `shared`/`server`/`composeApp`, Deploy `ssh ulrich@ai-vm && cd ~/ul-fitness && docker compose up`), wöchentlicher Backup-Cron.
 
 ---
 
