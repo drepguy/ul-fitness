@@ -1,14 +1,16 @@
 # UL Fitness — Spec
 
-**Version:** 0.1 — 2026-08-28  
-**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC advertiser)  
+**Version:** 0.2 — 2026-08-29  
+**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC advertiser; RPE 1-10; 2 gyms + extensible)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
 ---
 
 ## 1. Summary
 
-Personal, private fitness app to **track sets × reps × weight per exercise** during workouts, with **RPE 1-10 + notes**, fast gym logging, and **progress visualisation**. No public hosting: data lives on **ai-vm (Ubuntu) MariaDB**, **Docker**, accessed **only via Tailscale tailnet** (existing LXC subnet advertiser). Multi-user capable from day one (you + future friends), offline-first on device.
+Personal, private fitness app to **track sets × reps × weight per exercise/machine** during workouts, with **RPE 1-10 + notes**, fast gym logging, and **progress visualisation**. No public hosting: data lives on **ai-vm (Ubuntu) MariaDB**, **Docker**, accessed **only via Tailscale tailnet** (existing LXC subnet advertiser). Multi-user capable from day one (you + future friends), offline-first on device.
+
+Current reality: **2 gyms** — **Thomas Sport Center** (Upper Body) and **All Inclusive Fitness** (Legs + Core). User picks **gym → exercises/machines for that gym** (or creates new ones inline) → logs sets. Spec treats gyms first-class and extensible (N gyms), exercises/machines unified but filterable by gym.
 
 Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (foojay), `MainActivity.java:5` dark splash (`ic_ul_logo.xml` + `UL FITNESS`), `BuildConfig` not yet KMP — greenfield for domain.
 
@@ -16,10 +18,11 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 
 **Goals**
 - Log a set in <3 taps, one-handed, with sweaty fingers; rest timer keeps you moving.
+- **Gym-aware logging:** choose gym at workout start, then picker shows only relevant exercises/machines for that gym (+ search globally); create new exercise/machine inline (with gym binding).
 - Reliable offline: log without signal/VPN, sync when back on Tailnet.
-- Honest progress charts (e1RM, volume, PRs) per exercise, not just a log.
+- Honest progress charts (e1RM, volume, PRs) per exercise/machine, filterable by gym.
 - Private by construction: API/DB never on public internet; VPN is the perimeter.
-- Multi-user from schema day one (FK `user_id` everywhere).
+- Multi-user from schema day one (FK `user_id` everywhere, gyms/exercises per user or system).
 
 **Non-Goals**
 - Public distribution, App-Store compliance, analytics, ads.
@@ -78,25 +81,41 @@ CREATE TABLE users (
   password_hash VARCHAR(255) NOT NULL,
   created_at DATETIME(6) NOT NULL DEFAULT NOW(6)
 );
-CREATE TABLE exercises (
+CREATE TABLE gyms (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  owner_id BIGINT NULL, -- NULL = system exercise
+  owner_id BIGINT NULL, -- NULL = system/seeded gym visible to all; else private to user
   name VARCHAR(120) NOT NULL,
-  category ENUM('push','pull','legs','core','full','cardio','other') NOT NULL,
+  city VARCHAR(120) NULL, -- optional, for display
   is_system BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME(6) NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_exercise_owner_name(owner_id, name)
+  UNIQUE KEY uq_gym_owner_name(owner_id, name)
+);
+CREATE TABLE exercises (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  owner_id BIGINT NULL, -- NULL = system exercise
+  gym_id BIGINT NULL, -- NULL = available at every gym (e.g. Bench Press, Squat); NOT NULL = machine/equipment only at that gym
+  name VARCHAR(120) NOT NULL,
+  category ENUM('push','pull','legs','core','full','cardio','other') NOT NULL,
+  kind ENUM('free_weight','machine','cable','bodyweight','other') NOT NULL DEFAULT 'free_weight',
+  is_system BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME(6) NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (gym_id) REFERENCES gyms(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_exercise_owner_gym_name(owner_id, gym_id, name)
 );
 CREATE TABLE workouts (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT NOT NULL,
+  gym_id BIGINT NULL, -- nullable for back-compat; v1 requires it
   started_at DATETIME(6) NOT NULL,
   ended_at DATETIME(6) NULL,
   notes TEXT NULL,
   created_at DATETIME(6) NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_workouts_user_started(user_id, started_at)
+  FOREIGN KEY (gym_id) REFERENCES gyms(id) ON DELETE SET NULL,
+  INDEX idx_workouts_user_started(user_id, started_at),
+  INDEX idx_workouts_gym(gym_id)
 );
 CREATE TABLE workout_exercises (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -119,9 +138,17 @@ CREATE TABLE sets (
   FOREIGN KEY (workout_exercise_id) REFERENCES workout_exercises(id) ON DELETE CASCADE
 );
 -- V2 candidate: body_metrics(id,user_id,date,weight_kg,body_fat)
+-- seed in V1:
+-- INSERT INTO gyms(owner_id,name,is_system) VALUES (NULL,'Thomas Sport Center',TRUE),(NULL,'All Inclusive Fitness',TRUE);
+-- INSERT INTO exercises(owner_id,gym_id,name,category,kind,is_system) VALUES
+--   (NULL,NULL,'Bench Press','push','free_weight',TRUE),
+--   (NULL,NULL,'Squat','legs','free_weight',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Leg Press','legs','machine',TRUE), ...
 ```
 
-**Conventions:** UTC `DATETIME(6)`, `DECIMAL(5,2)` for kg (allows 999.99). System exercises seed (Bench, Squat, Deadlift, OHP, Row, Pull-up, etc.).
+**Gym modeling:** `gyms` first-class, extensible N. Seed the two current gyms as `is_system` so every user sees them; `Thomas Sport Center` default tag = Upper, `All Inclusive Fitness` = Legs+Core but not enforced — user can do any category at either gym. `exercises.gym_id` distinguishes global free-weights (`NULL`, show at any gym) vs gym-specific machines (e.g. “Chest Press #2” `gym_id=All Inclusive` only appears when that gym is selected; global search can still find it). Validation: `workouts.gym_id` must match or be `NULL` for exercises added to that workout if `exercises.gym_id IS NOT NULL`.
+
+**Conventions:** UTC `DATETIME(6)`, `DECIMAL(5,2)` for kg (allows 999.99). System exercises/machines seeded for both gyms.
 
 **RPE 1-10:** User decision. `1` = minimal effort / warm-up, `10` = limit / could not do one more rep. `is_failure` separate because failure can happen at any RPE; chart can show RPE trend. Null = not recorded (v1 optional but stored).
 
@@ -132,39 +159,47 @@ CREATE TABLE sets (
 - `POST /auth/login {email,password}` → `200 {accessToken, refreshToken, expiresIn}`
 - `POST /auth/refresh {refreshToken}` → `200 {accessToken}`
 
-**Exercises**
-- `GET /exercises` → `[{id,name,category,is_system,owner_id}]` (system + mine)
-- `POST /exercises {name,category}` → `201`
-- `PUT /exercises/{id} {name}` (only own custom)
+**Gyms**
+- `GET /gyms` → `[{id,name,city,is_system,owner_id}]` (system + mine)
+- `POST /gyms {name, city?}` → `201 {id}` (create new gym, `owner_id = me`)
+- `PUT /gyms/{id} {name, city}` (only own gyms) → `200`
+- `DELETE /gyms/{id}` (only own, fails if referenced by workouts unless `?force` migrates)
+
+**Exercises / Machines** (unified)
+- `GET /exercises?gymId=&q=&category=&include_system=true` → `[{id,name,category,kind,gym_id,gym_name,is_system,owner_id}]` — when `gymId` set, returns `gym_id IS NULL` (global) **plus** `gym_id = ?` (machines for that gym), sorted machines last.
+- `POST /exercises {name,category,kind,gym_id?}` → `201 {id}` — `kind=machine` requires `gym_id`; `kind=free_weight/bodyweight` usually `gym_id=NULL` (allow any gym). Validation: `gym_id` must be system or owned by me.
+- `PUT /exercises/{id} {name,category,kind,gym_id}` (only own) → `200`
+- `DELETE /exercises/{id}` (only own, soft if referenced)
 
 **Workouts**
-- `POST /workouts {started_at, notes?, exercises:[{exerciseId, sets:[{reps,weight_kg,rpe?,is_failure,note?}]}]}` → `201 {id}`
-- `GET /workouts?from=&to=&limit=&offset=` (own only) → list, supports `since` for sync
-- `GET /workouts/{id}` (full graph)
-- `PATCH /workouts/{id}/finish {ended_at}`
+- `POST /workouts {gym_id, started_at, notes?, exercises:[{exerciseId, sets:[{reps,weight_kg,rpe?,is_failure,note?}]}]}` → `201 {id}` — validates `exercise.gym_id IS NULL OR = workouts.gym_id`; `409` if machine from other gym.
+- `GET /workouts?gymId=&from=&to=&limit=&offset=&since=` (own only) → list, supports `since` for sync; `gymId` filter optional.
+- `GET /workouts/{id}` (full graph + `gym` + `gym_name` at top)
+- `PATCH /workouts/{id}/finish {ended_at}` / `PATCH /workouts/{id} {gym_id, notes}` (pre-finish)
 - `DELETE /workouts/{id}`
 
-**Stats**
-- `GET /stats/progress?exerciseId=&period=90d&metric=e1RM|volume|max` → `[{date, value, reps, weight_kg}]` (`e1RM = weight*(1+reps/30)` Epley; volume = Σ `reps*weight`)
-- `GET /stats/prs?exerciseId=` → `{maxWeight:{value,date}, maxE1RM:{}, maxVolume:{}}`
+**Stats** (gym-aware)
+- `GET /stats/progress?exerciseId=&gymId=&period=90d&metric=e1RM|volume|max` → `[{date, value, reps, weight_kg}]` (`e1RM = weight*(1+reps/30)` Epley; volume = Σ `reps*weight`) — `gymId` optional filter.
+- `GET /stats/prs?exerciseId=&gymId=` → `{maxWeight:{value,date,gym}, maxE1RM:{}, maxVolume:{}}`
 
-**Conventions:** `401` on bad JWT, `403` on not own resource, `409` on duplicate exercise name, `X-Request-Id` logs.
+**Conventions:** `401` on bad JWT, `403` on not own resource, `409` on duplicate `(owner,gym,name)` or machine-gym mismatch, `X-Request-Id` logs.
 
 ## 8. App Spec
 
 **Screens (Compose)**
 1. **Start** — keep `ic_ul_logo.xml` → Compose vector, `UL FITNESS` title, dark `background_dark #0F0F0F` (unchanged `themes.xml:3`), `AppCompatDelegate.MODE_NIGHT_YES` remains.
 2. **Login/Register** — email+password, `DataStore` token, auto-refresh.
-3. **Home** — today CTA `Start workout`, recent workouts, last PR snippet.
+3. **Home** — gym quick-picks (`Thomas Sport Center` / `All Inclusive Fitness` chips, plus `+` for new gym), today CTA `Start workout`, recent workouts grouped by gym, last PR snippet.
 4. **Workout (focus)** — *ease during workout is #1:*
-   - Template picker: last workout cloned, or blank, or saved routine (v1: just last).
-   - Per exercise block: previous set ghost (tap to copy weight), reps stepper `−/ +` (big 56dp), weight chips `−2.5/ +2.5 / +5`, numpad fallback, `RPE 1-10` slider (ticks) + `Failure` checkbox, per-set `note` (expandable `TextField`), `Log set` haptic.
+   - **Gym picker (first step):** `Start workout` → select gym (Thomas / All Inclusive / other created). Choice sets `workouts.gym_id`, determines available machines. Can change before first set. Remembers last gym.
+   - **Exercise/Machine picker:** `+ Add exercise` opens sheet: two tabs/search scopes — `This Gym` (global `gym_id NULL` + machines for this gym) and `All` (global search). List shows `kind` badge (machine vs free_weight). Inline `+ Create new` → dialog `Name, Category (push/pull/legs/core...), Kind (free_weight/machine/cable/bodyweight), Gym (pre-filled current, editable)` → `POST /exercises`. Optimistic local insert, queued sync.
+   - Per exercise block: previous set ghost (tap to copy weight), reps stepper `−/ +` (big 56dp), weight chips `−2.5/ +2.5 / +5`, numpad fallback, `RPE 1-10` slider (ticks 1-10 labels) + `Failure` checkbox, per-set `note` (expandable `TextField`), `Log set` haptic.
    - Rest timer: circular `Vico`/`CircularProgress`, `90s` default (per-exercise remember), notification `Add 30s / Skip` (`POST_NOTIFICATIONS` on SDK 37), auto-start on log, vibrate at 0.
-   - Swipe between exercises, sticky exercise header.
-   - `Finish` → PATCH `ended_at`; offline → queue.
-5. **History** — paged list, search, swipe delete, edit (reload into Workout).
-6. **Progress** — exercise selector + `Vico` line chart, period `4W/12W/1Y/All`, metrics `e1RM/Volume/Max`, PR badges, table of raw sets.
-7. **Manage Exercises** — create custom, hide system.
+   - Swipe between exercises, sticky exercise header with `gym_name • exercise_name`.
+   - `Finish` → PATCH `ended_at`; offline → queue. Shows summary `Gym • duration • volume`.
+5. **History** — paged list grouped by gym (filter chip `All / Thomas / All Inclusive`), search, swipe delete, edit (reload into Workout with same `gym_id`).
+6. **Progress** — gym filter + exercise/machine selector (filtered by gym) + `Vico` line chart, period `4W/12W/1Y/All`, metrics `e1RM/Volume/Max`, PR badges, table of raw sets with gym column.
+7. **Manage** — two sections: **Gyms** (`+` create, rename own, hides system only via filter) and **Exercises/Machines** (filter by gym chip, create, hide system). Seed management: system Thomas/All Inclusive always visible.
 
 **Data & sync**
 - **Offline-first:** `SqlDelight` cache is source of truth; `WorkoutRepository` writes locally, `SyncWorker` (WorkManager, `NetworkType.CONNECTED` + tailnet probe `GET /health`) does `POST` pending + `GET /workouts?since=lastSync`. Conflict: last-write-wins (safe for personal).
@@ -175,11 +210,12 @@ CREATE TABLE sets (
 
 ## 9. Visualization
 
-- Library: `Vico 2.0` (CMP). Single chart per exercise, three toggles:
+- Library: `Vico 2.0` (CMP). Single chart per exercise/machine, three toggles:
   - **e1RM** (primary) — `weight*(1+reps/30)`, smoothed 7d avg.
   - **Total volume** — `Σ reps*weight` per session.
   - **Max weight** — top set per session.
-- X: date, Y: kg / kg×reps. Markers: PRs with label, failed sets dimmed. Table below chart for raw export (CSV later).
+- X: date, Y: kg / kg×reps. Markers: PRs with label, failed sets dimmed, gym color dot. Table below chart for raw export (CSV later) with gym column.
+- Gym filter chip (`All / Thomas Sport Center / All Inclusive Fitness`) narrows picker and chart; e.g. Leg Press at All Inclusive vs generic Squat shows distinct lines. `GET /stats/progress?gymId=` powers it.
 
 ## 10. Tailscale Networking
 
@@ -274,14 +310,15 @@ iOS/Desktop targets (KMP ready but ungenerated), body-metrics, CSV export, routi
 - Tailscale over new WireGuard/OpenVPN (existing advertiser).
 - KMP + Ktor per user choice (shared Kotlin, no FastAPI).
 - Vico over MPAndroidChart (CMP).
+- **Gyms first-class (2026-08-29):** `gyms` table, seed `Thomas Sport Center` (Upper) + `All Inclusive Fitness` (Legs/Core) as `is_system`. `exercises.gym_id NULL` = global free-weight, otherwise machine tied to one gym (user wants to choose per-gym machines or create new). `workouts.gym_id` required. Picker filters `global + this-gym machines`, API validates mismatch. Covers your current 2-gym split but extensible N.
 
 ## 18. Phases
 
 - **P0 (0.5d):** Confirm MagicDNS name, `docker-compose.yml` health, `GET /health` over Tailnet.
-- **P1 (1.5d):** Flyway V1, JWT, CRUD, seed system exercises.
-- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight, Workout screen + rest timer + RPE 1-10.
+- **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id), seed `Thomas Sport Center` / `All Inclusive Fitness` + system exercises/machines, JWT, gym/exercise/workout CRUD.
+- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms+migrations), Workout screen with **gym picker → exercise/machine picker (filtered) + inline create** + rest timer + RPE 1-10.
 - **P3 (1d):** `SyncWorker`, MagicDNS `BuildConfig`, offline banner.
-- **P4 (1.5d):** Vico progress + PRs.
+- **P4 (1.5d):** Vico progress + PRs with **gym filter**.
 - **P5 (0.5d):** Bind-to-tailnet, pinning, signing, `AGENTS.md` update (add `shared`/`server`, deploy cmd).
 
 ---
