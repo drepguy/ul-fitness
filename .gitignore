@@ -1,15 +1,41 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# Gradle / Build
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+.navigation/
+output-metadata.json
+
+# Local config (SDK path, keystores)
 local.properties
+*.jks
+*.keystore
+
+# Google Services
+google-services.json
+
+# APK / AAB
+*.apk
+*.aab
+*.ap_
+
+# Logs & profiling
+*.log
+*.hprof
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+# Keep shared code style if added:
+# !.idea/codeStyles/
+# !.idea/dictionaries/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# NDK
+obj/
