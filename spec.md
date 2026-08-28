@@ -1,7 +1,7 @@
 # UL Fitness — Spec
 
-**Version:** 0.4.2 — 2026-08-30  
-**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides; 1 Gerät → n Übungen; UI einfach→mächtig)  
+**Version:** 0.4.3 — 2026-08-30  
+**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides; 1 Gerät → n Übungen; UI einfach→mächtig; Icons)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
 ---
@@ -101,6 +101,7 @@ CREATE TABLE exercises (
   name VARCHAR(120) NOT NULL,
   category ENUM('push','pull','legs','core','full','cardio','other') NOT NULL,
   kind ENUM('free_weight','machine','cable','bodyweight','other') NOT NULL DEFAULT 'free_weight',
+  icon_key VARCHAR(40) NOT NULL DEFAULT 'dumbbell', -- Katalog: dumbbell, barbell, leg_press, leg_ext, leg_curl, calf, hip_thrust, chest_press, lat_pull, row, shoulder_press, lateral_raise, face_pull, bicep_curl, triceps, ab_machine, hyperext
   is_system BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME(6) NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -193,18 +194,19 @@ CREATE TABLE workout_template_exercises (
 --   Unterarme innen/außen Curls,
 --   // zusätzlich sitzende Wadenheber + separate Wadenmaschine (Thomas, noch nicht geloggt, aber anlegbar)
 --   Wadenheber sitzend (Thomas), Wadenmaschine Thomas
--- INSERT INTO exercises(owner_id,gym_id,name,category,kind,is_system) VALUES
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hackenschmidt','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hip Thrust Machine','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Beinpresse horizontal','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenpresse horizontal','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Beinpresse 45°','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenpresse 45°','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenheber sitzend','legs','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Wadenheber sitzend','legs','machine',TRUE),
---   (NULL,NULL,'Hyperextension','core','bodyweight',TRUE), -- weight 0 = body
---   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Brustpresse','push','machine',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Latzug','pull','cable',TRUE), ...
+-- INSERT INTO exercises(owner_id,gym_id,name,category,kind,icon_key,is_system) VALUES
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hackenschmidt','legs','machine','leg_press',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hip Thrust Machine','legs','machine','hip_thrust',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Beinpresse horizontal','legs','machine','leg_press',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenpresse horizontal','legs','machine','calf',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Beinpresse 45°','legs','machine','leg_press',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenpresse 45°','legs','machine','calf',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenheber sitzend','legs','machine','calf',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Wadenheber sitzend','legs','machine','calf',TRUE),
+--   (NULL,NULL,'Hyperextension','core','bodyweight','hyperext',TRUE), -- weight 0 = body
+--   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Brustpresse','push','machine','chest_press',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Latzug','pull','cable','lat_pull',TRUE),
+--   -- weitere: Leg Ext → leg_ext, Leg Curl → leg_curl, Shoulder → shoulder_press, Seitheben → lateral_raise, usw.
 ```
 
 **Gym modeling:** `gyms` first-class, extensible N. Seed die zwei Studios als `is_system`; `Thomas Sport Center` = Upper, `All Inclusive Fitness` = Beine/Core — nicht erzwungen. Ein **Gerät** (z. B. `Beinpresse horizontal`) kann **mehrere Übungen** hosten — dein Fall: `Beinpresse horizontal` + `Wadenpresse horizontal` und `Beinpresse 45°` + `Wadenpresse 45°` sind **4 Übungen auf 2 Geräten** (`spec.md:179`). Gleiches für `Wadenheber sitzend` (All Inclusive + Thomas je eine Maschine). Generell: **Gerät = physisches Gerät, Übung = Bewegung + Gerät + Studio** — v1 vereint als `exercises` (`gym_id` + `name`). Nutzer kann jederzeit `Geräte/Übungen` anlegen (`POST /exercises`, `kind=machine` braucht `gym_id`), daher flexibel. Validierung: `workouts.gym_id` muss zu `exercises.gym_id` (oder `NULL` für globale) passen; `Beinpresse horizontal (Quads)` und `Wadenpresse horizontal (Waden)` sind trotz gleichem Gerät getrennt trackbar (eigene PRs/Charts).
@@ -228,13 +230,16 @@ CREATE TABLE workout_template_exercises (
 - `PUT /gyms/{id} {name, city}` (only own gyms) → `200`
 - `DELETE /gyms/{id}` (only own, fails if referenced by workouts unless `?force` migrates)
 
-**Exercises / Machines** (unified, German names)
-- `GET /exercises?gymId=&q=&category=&include_system=true` → `[{id,name,category,kind,gym_id,gym_name,is_system,owner_id,aliases:[...]}]` — when `gymId` set, returns `gym_id IS NULL` (global) **plus** `gym_id = ?` (machines for that gym), sorted machines last. `q` matches `name` **and** `exercise_aliases.alias`.
-- `POST /exercises {name,category,kind,gym_id?,aliases?:[string]}` → `201 {id}` — `kind=machine` requires `gym_id`; `kind=free_weight/bodyweight` usually `gym_id=NULL` (allow any gym). Validation: `gym_id` must be system or owned by me.
-- `PUT /exercises/{id} {name,category,kind,gym_id}` (only own) → `200`
+**Exercises / Machines** (unified, German names, mit Icon)
+- `GET /exercises?gymId=&q=&category=&include_system=true` → `[{id,name,category,kind,icon_key,gym_id,gym_name,is_system,owner_id,aliases:[...]}]` — when `gymId` set, returns `gym_id IS NULL` (global) **plus** `gym_id = ?` (machines for that gym), sorted machines last. `q` matches `name` **and** `exercise_aliases.alias`. `icon_key` ∈ Katalog unten.
+- `POST /exercises {name,category,kind,icon_key?,gym_id?,aliases?:[string]}` → `201 {id}` — `kind=machine` requires `gym_id`; `icon_key` default `dumbbell` wenn nicht angegeben. Validation: `gym_id` must be system or owned by me.
+- `PUT /exercises/{id} {name,category,kind,icon_key,gym_id}` (only own) → `200` — ändert Icon.
 - `PUT /exercises/{id}/aliases {add:[], remove:[]}` → `200` — manage aliases
 - `GET /exercises/{id}/aliases` → `[{alias}]`
 - `DELETE /exercises/{id}` (only own, soft if referenced)
+
+**Icon-Katalog** (`drawable/ic_exercise_<key>.xml`, 16 Keys, dunkles Hexagon wie `ic_ul_logo.xml`):
+`dumbbell`, `barbell`, `leg_press`, `leg_ext`, `leg_curl`, `calf`, `hip_thrust`, `chest_press`, `lat_pull`, `row`, `shoulder_press`, `lateral_raise`, `face_pull`, `bicep_curl`, `triceps`, `ab_machine`, `hyperext` (Fallback `dumbbell`). Wahl im `Neu anlegen`-Dialog (Grid, Icon groß), später änderbar.
 
 **Workouts**
 - `POST /workouts {gym_id, started_at, notes?, exercises:[{exerciseId, sets:[{reps,weight_kg,is_warmup?,rpe?,is_failure,note?}]}]}` → `201 {id}` — validates `exercise.gym_id IS NULL OR = workouts.gym_id`; `409` if machine from other gym. `is_warmup` marks warmup sets (not counted in e1RM/PR), `weight_kg=0` means bodyweight.
@@ -303,16 +308,16 @@ CREATE TABLE workout_template_exercises (
    [ + Übung hinzufügen ]  [ Als Vorlage speichern ]
    ```
    - **Studio-Wahl:** Erster Schritt nach `Training starten`, setzt `workouts.gym_id` (vor erstem Satz änderbar).
-   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` → Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. Badge `Gerät/Freihantel`, Alias-Suche `Hackschmitt`. `+ Neu anlegen` → Dialog `Name, Kategorie, Art, Studio (vorausgefüllt), Aliase?` → `POST /exercises`.
-   - **Pro Übung:** Geist-Tippen füllt Gewicht, Chips/Numpad (`47,5` Komma), RPE-Slider + `Muskelversagen`, `Satz speichern` Haptik, Parser auch `12x35kg`.
+   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` → Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. **Zeile: Icon `ic_exercise_<icon_key>` links + Name + Badge `Gerät/Freihantel`**, Alias-Suche `Hackschmitt`. `+ Neu anlegen` → Dialog **Icon wählen (Grid 16)** + `Name, Kategorie, Art, Studio (vorausgefüllt), Aliase?` → `POST /exercises {icon_key}`. Optimistisch lokal.
+   - **Pro Übung:** Header `Icon + Name + Gym`. Geist-Tippen füllt Gewicht, Chips/Numpad (`47,5` Komma), RPE-Slider + `Muskelversagen`, `Satz speichern` Haptik, Parser auch `12x35kg`.
    - **Pausentimer:** rund, `90s` pro Übung gemerkt, Notification `+30s/Überspringen` (`POST_NOTIFICATIONS` 37), Vibration 0.
    - **Weitere:** Swipe Übung↔Übung, sticky `Studio • Übung`, `Beenden` → `PATCH ended_at`; offline Queue; Zusammenfassung `Studio • Dauer • Volumen (KG)`; `● Offline` Banner oben wenn `GET http://ai-vm:8080/api/v1/health` fehlschlägt.
 
-5. **Verlauf** — paginiert, nach Studio gruppiert (Filter `Alle / Thomas / All Inclusive`), Suche auch Alias, Wischen Löschen, Tippen → gleiches `gym_id` ins Training laden.
+5. **Verlauf** — paginiert, nach Studio gruppiert (Filter `Alle / Thomas / All Inclusive`), **Zeile mit Icon** + Suche auch Alias, Wischen Löschen, Tippen → gleiches `gym_id` ins Training laden.
 
-6. **Fortschritt** — Studio-Filter + Übungs-Suche (aliasfähig) + `Vico` Linie, `4W/12W/1J/Alle`, `e1RM/Volumen/Max`, PR-Abzeichen, Tabelle Rohsätze mit Studio-Spalte (Warmup grau, `0kg` ignoriert).
+6. **Fortschritt** — Studio-Filter + Übungs-Suche (aliasfähig, **mit Icon**) + `Vico` Linie, `4W/12W/1J/Alle`, `e1RM/Volumen/Max`, PR-Abzeichen, Tabelle Rohsätze mit Studio-Spalte (Warmup grau, `0kg` ignoriert).
 
-7. **Verwalten** — **Studios** (`+` anlegen) + **Übungen/Geräte** (nach Studio filtern, `+ Neu`, Alias via `PUT /aliases`). System-Studios immer sichtbar.
+7. **Verwalten** — **Studios** (`+` anlegen) + **Übungen/Geräte** (nach Studio filtern, **Icon links**, `+ Neu` mit Icon-Wahl, Alias via `PUT /aliases`). System-Studios immer sichtbar, Icon später änderbar `PUT /exercises/{id} {icon_key}`.
 
 **Data & sync**
 - **Offline-first:** `SqlDelight` cache source of truth; `WorkoutRepository` lokal, `SyncWorker` (WorkManager + Tailnet-Probe `GET /health`) `POST` pending + `GET ?since=`, last-write-wins. Geräte/Übungen-Anlage optimistisch lokal, aliasfähig.
