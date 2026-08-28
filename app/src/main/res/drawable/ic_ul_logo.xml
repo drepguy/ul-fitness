@@ -1,0 +1,67 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+
+    <!-- Outer glow -->
+    <path
+        android:fillColor="#1A03DAC5"
+        android:pathData="M60,6 L102,28 L102,76 L60,100 L18,76 L18,28 Z" />
+
+    <!-- Hexagon frame with gradient -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M60,10 L98,30 L98,72 L60,94 L22,72 L22,30 Z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="22"
+                android:startY="10"
+                android:endX="98"
+                android:endY="94">
+                <item android:offset="0" android:color="#FFBB86FC" />
+                <item android:offset="1" android:color="#FF03DAC5" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner dim hexagon -->
+    <path
+        android:fillColor="#1E1E1E"
+        android:pathData="M60,14 L94,32 L94,70 L60,90 L26,70 L26,32 Z"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="0.8" />
+
+    <!-- Dumbbell bar -->
+    <path
+        android:fillColor="#EDE7F6"
+        android:pathData="M34,58 L86,58 L86,62 L34,62 Z" />
+
+    <!-- Left plates -->
+    <path
+        android:fillColor="#BB86FC"
+        android:pathData="M26,44h6a2,2 0 0 1 2,2v28a2,2 0 0 1 -2,2h-6a2,2 0 0 1 -2,-2V46a2,2 0 0 1 2,-2z" />
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M34,48h5a1.5,1.5 0 0 1 1.5,1.5v21a1.5,1.5 0 0 1 -1.5,1.5h-5a1,1 0 0 1 -1,-1V49a1,1 0 0 1 1,-1z" />
+
+    <!-- Right plates -->
+    <path
+        android:fillColor="#03DAC5"
+        android:pathData="M88,44h6a2,2 0 0 1 2,2v28a2,2 0 0 1 -2,2h-6a2,2 0 0 1 -2,-2V46a2,2 0 0 1 2,-2z" />
+    <path
+        android:fillColor="#018786"
+        android:pathData="M81,48h5a1,1 0 0 1 1,1v22a1,1 0 0 1 -1,1h-5a1.5,1.5 0 0 1 -1.5,-1.5v-21a1.5,1.5 0 0 1 1.5,-1.5z" />
+
+    <!-- Center accent dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M60,56a4,4 0 1 1 0,8a4,4 0 0 1 0,-8z"
+        android:strokeColor="#1AFFFFFF"
+        android:strokeWidth="2" />
+
+</vector>
