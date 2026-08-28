@@ -130,20 +130,33 @@ CREATE TABLE sets (
   workout_exercise_id BIGINT NOT NULL,
   set_no INT NOT NULL,
   reps INT NOT NULL CHECK (reps >= 0),
-  weight_kg DECIMAL(5,2) NOT NULL CHECK (weight_kg >= 0),
+  weight_kg DECIMAL(5,2) NOT NULL CHECK (weight_kg >= 0), -- 0 = bodyweight (e.g. Hyperextension 10x body)
+  is_warmup BOOLEAN NOT NULL DEFAULT FALSE, -- e.g. "0 und 15kg warmup"
   rpe TINYINT NULL CHECK (rpe BETWEEN 1 AND 10),
   is_failure BOOLEAN NOT NULL DEFAULT FALSE,
-  note TEXT NULL, -- short note per set (e.g. "slow eccentric")
+  note TEXT NULL, -- per-set note e.g. "oberschenkel Innenseite zieht leicht"
   created_at DATETIME(6) NOT NULL,
   FOREIGN KEY (workout_exercise_id) REFERENCES workout_exercises(id) ON DELETE CASCADE
 );
 -- V2 candidate: body_metrics(id,user_id,date,weight_kg,body_fat)
--- seed in V1:
+-- seed in V1 (2 gyms + canonical machines/exercises derived from real logs 2025-2026):
+-- gyms: Thomas Sport Center (Upper), All Inclusive Fitness (Legs/Core)
 -- INSERT INTO gyms(owner_id,name,is_system) VALUES (NULL,'Thomas Sport Center',TRUE),(NULL,'All Inclusive Fitness',TRUE);
+-- All Inclusive — Legs/Core seed (kind=machine unless noted):
+--   Hackenschmidt, Hip Thrust Machine, Hip Thrust (free_weight), Beinstrecker (Leg Extension),
+--   Beinbeuger (Leg Curl), Waden an 45er Presse, Waden horizontal / Beinpresse horizontal (Leg Press horizontal),
+--   Bauchmaschine, Hyperextension (bodyweight), Beinpresse, V Squat Machine
+-- Thomas Sport Center — Upper seed:
+--   Latzug, Brustpresse, Rudern / Rudern Maschine / Rudern Brustgestützt, Brustfly / Chest Fly,
+--   Schulterpresse, Seitheben, Face Pulls, Bizeps Hammer Curls / Bizeps am Kabelzug,
+--   Trizeps Skull Crush / Trizeps Overhead Kabelzug, Bauch, Waden einseitig,
+--   Unterarme innen/außen Curls
 -- INSERT INTO exercises(owner_id,gym_id,name,category,kind,is_system) VALUES
---   (NULL,NULL,'Bench Press','push','free_weight',TRUE),
---   (NULL,NULL,'Squat','legs','free_weight',TRUE),
---   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Leg Press','legs','machine',TRUE), ...
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hackenschmidt','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hip Thrust Machine','legs','machine',TRUE),
+--   (NULL,NULL,'Hyperextension','core','bodyweight',TRUE), -- weight 0 = body
+--   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Brustpresse','push','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Latzug','pull','cable',TRUE), ...
 ```
 
 **Gym modeling:** `gyms` first-class, extensible N. Seed the two current gyms as `is_system` so every user sees them; `Thomas Sport Center` default tag = Upper, `All Inclusive Fitness` = Legs+Core but not enforced — user can do any category at either gym. `exercises.gym_id` distinguishes global free-weights (`NULL`, show at any gym) vs gym-specific machines (e.g. “Chest Press #2” `gym_id=All Inclusive` only appears when that gym is selected; global search can still find it). Validation: `workouts.gym_id` must match or be `NULL` for exercises added to that workout if `exercises.gym_id IS NOT NULL`.
@@ -172,7 +185,7 @@ CREATE TABLE sets (
 - `DELETE /exercises/{id}` (only own, soft if referenced)
 
 **Workouts**
-- `POST /workouts {gym_id, started_at, notes?, exercises:[{exerciseId, sets:[{reps,weight_kg,rpe?,is_failure,note?}]}]}` → `201 {id}` — validates `exercise.gym_id IS NULL OR = workouts.gym_id`; `409` if machine from other gym.
+- `POST /workouts {gym_id, started_at, notes?, exercises:[{exerciseId, sets:[{reps,weight_kg,is_warmup?,rpe?,is_failure,note?}]}]}` → `201 {id}` — validates `exercise.gym_id IS NULL OR = workouts.gym_id`; `409` if machine from other gym. `is_warmup` marks warmup sets (not counted in e1RM/PR), `weight_kg=0` means bodyweight.
 - `GET /workouts?gymId=&from=&to=&limit=&offset=&since=` (own only) → list, supports `since` for sync; `gymId` filter optional.
 - `GET /workouts/{id}` (full graph + `gym` + `gym_name` at top)
 - `PATCH /workouts/{id}/finish {ended_at}` / `PATCH /workouts/{id} {gym_id, notes}` (pre-finish)
@@ -305,21 +318,79 @@ iOS/Desktop targets (KMP ready but ungenerated), body-metrics, CSV export, routi
 
 ## 17. Decisions Log
 
-- RPE `1-10` (user: `1-10`), `is_failure` separate. Covers warm-up to limit.
+- RPE `1-10` (user: `1-10`), `is_failure` separate. Covers warm-up to limit. Per-set `is_warmup` added for logs like `0 und 15kg warmup`.
 - Multi-user from schema start (FK `user_id`).
 - Tailscale over new WireGuard/OpenVPN (existing advertiser).
 - KMP + Ktor per user choice (shared Kotlin, no FastAPI).
 - Vico over MPAndroidChart (CMP).
 - **Gyms first-class (2026-08-29):** `gyms` table, seed `Thomas Sport Center` (Upper) + `All Inclusive Fitness` (Legs/Core) as `is_system`. `exercises.gym_id NULL` = global free-weight, otherwise machine tied to one gym (user wants to choose per-gym machines or create new). `workouts.gym_id` required. Picker filters `global + this-gym machines`, API validates mismatch. Covers your current 2-gym split but extensible N.
+- **Machine/exercise input from real logs (2026-08-29):** See Appendix 19; decimal `47,5` comma, `body` weight, `y` typo handling → parser + seed aliases.
 
 ## 18. Phases
 
 - **P0 (0.5d):** Confirm MagicDNS name, `docker-compose.yml` health, `GET /health` over Tailnet.
-- **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id), seed `Thomas Sport Center` / `All Inclusive Fitness` + system exercises/machines, JWT, gym/exercise/workout CRUD.
-- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms+migrations), Workout screen with **gym picker → exercise/machine picker (filtered) + inline create** + rest timer + RPE 1-10.
+- **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id + sets.is_warmup), seed `Thomas Sport Center` / `All Inclusive Fitness` + system exercises/machines derived from Appendix 19, JWT, gym/exercise/workout CRUD with warmup/bodyweight support.
+- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms+migrations), Workout screen with **gym picker → exercise/machine picker (filtered) + inline create** + quick `reps×weight` parser (comma/dot, body) + rest timer + RPE 1-10.
 - **P3 (1d):** `SyncWorker`, MagicDNS `BuildConfig`, offline banner.
-- **P4 (1.5d):** Vico progress + PRs with **gym filter**.
+- **P4 (1.5d):** Vico progress + PRs with **gym filter** (warmup excluded from PR/e1RM).
 - **P5 (0.5d):** Bind-to-tailnet, pinning, signing, `AGENTS.md` update (add `shared`/`server`, deploy cmd).
+
+---
+
+## 19. Appendix — Real Logs & Derived Requirements
+
+User’s current notes (German, edited for spec). Parsing must be forgiving; app input should be **faster** than typing these strings by hand but **import-compatible** if pasting.
+
+**All Inclusive Fitness (Legs + Core)** — typical session `01.08.2026`:
+- `Hackschmitt: 12x35kg, 12x35kg, 12x35kg`
+- `Hip thrust machine: 9x20kg, 10x20kg, 9x20kg`
+- `Beinstrecker: 13x40kg, 9x47.5kg, 8x47.5kg`
+- `Beinbeuger: 12x40kg, 11x47,5kg, 8x47,5kg`
+- `Waden an 45er Presse: 13x50kg, 13x75kg, 13x85kg`
+- `Bauchmaschine: 14x37,5kg, 9x42,5kg` (sometimes `muss heute noch pausieren` note at workout level)
+- `Hyperextension: 10x8kg` (also `10x body`, `12xbodyweight`)
+
+Other variants seen across 01.08–26.08.2026: `Beinpresse horizontal 17x87.5kg`, `Waden horizontal 12x110kg`, `V Squat machine/Beinpresse Ersatz 10x65kg`, `40 und 70kg warmup` / `0 und 15kg warmup` / `50 und 75 warmup`, set notes like `oberschenkel Innenseite zieht leicht. Überlastet?`, `1 Sekunde pause am untersten Punkt`, `muss heute noch pausieren`, `weggelassen wegen muskelkater`, `Deload 1./3. session`, `abbruch` (aborted).
+
+**Thomas Sport Center (Upper)** — typical `21.07.2025` + `02.08–27.08.2026`:
+- `Latzug: 10x50kg, 8x50kg, 10x45kg`
+- `Brustpresse: 9x41kg, 7x36kg, 7x32kg` (also `Brust: 8x41`)
+- `Rudern: 7x60kg, 9x52,5kg` (variants: `Rudern Maschine`, `Rudern Brustgestützt 10x57.5kg`)
+- `Brustfly / Chest fly: 13x32, 8x27kg, 15x36kg`
+- `Schulterpresse: 8x18kg (austesten)`
+- `Bauch: 8x32kg`
+- `Waden einseitig: 8x54kg`, `Unterarme innen/außen curls: 11x5kg`
+- `Face pulls 10x9kg`, `Seitheben 10x5kg / 6x9kg (Mitglied links anfangen)`, `Bizeps Hammer Curls 10x10kg / Bizeps am Kabelzug 18x27kg`, `Trizeps Skull Crush 13x stange / 15x2.5kg / Trizeps overhead Kabelzug 14x18kg`
+
+**Derived input & catalog requirements**
+
+| Observation | Requirement |
+|---|---|
+| Two gyms with stable split (Thomas Upper, All Inclusive Legs/Core) | `gyms` seed + gym picker before workout, history grouped by gym; not enforced — user can do any category at either gym. |
+| Same movement under many spellings (`Brustpresse`/`Brust`, `Beinpresse`/`Beinpresse horizontal`, `Waden an 45er`/`Waden horizontal`, `Hackschmitt` typo for `Hackenschmidt`, `Chest fly`/`Brustfly`) | Canonical `exercises.name` + **alias column** (future V2 `exercise_aliases` or client-side `alias → canonical` map). Picker shows canonical, search matches alias. Seed includes most frequent aliases below. |
+| Machines vs free weights conflated | `kind` enum `free_weight/machine/cable/bodyweight`; `kind=machine` must have `gym_id`. UI badge `G` vs `M`. |
+| Weight formats `47,5kg`, `47.5kg`, `50kg`, `stange` (bar), `body`/`bodyweight` | Parser: accept comma **or** dot, optional `kg`, `body` → `weight_kg=0` + `note=bodyweight` or `is_warmup` handling; `stange` → prompt `Bar weight? (default 8kg)` or save as `note=stange`. Store normalized `5.2`. |
+| Warmups `0 und 15kg warmup`, `40 und 70kg warmup` | `is_warmup=true` (excluded from charts/PR), rendered ghosted. Quick toggle long-press `W`. |
+| Per-set notes in parentheses, per-workout notes (`muss heute noch pausieren`, `Deload`) | `sets.note` + `workouts.notes`; long-press set row to add note. Deload tag = `workouts.notes` contains `Deload`. |
+| Varying set counts (2–4 sets, sometimes extra set as replacement) | `+ Add set` unlimited, not fixed 3; previous set ghost. |
+| Typos `10y20kg`, double commas | Client parser sanitizes `y→x`, `,,→,`, trims spaces. |
+| Quick entry need during workout | Target flow: `Start → pick Thomas → + Brustpresse → 10x41 (numpad) → Log → RPE 8 → auto next set with +2.5kg chip → Finish`. Picker remembers recent for that gym. |
+
+**Canonical seed + aliases (V1 minimal for import)**
+
+```sql
+-- Thomas Sport Center
+-- Brustpresse (alias: Brust), Latzug, Rudern, Rudern Maschine, Rudern Brustgestützt,
+-- Brustfly/Chest Fly, Schulterpresse, Seitheben, Face Pulls,
+-- Trizeps Skull Crush, Trizeps Overhead Kabelzug, Bizeps Hammer Curls, Bizeps am Kabelzug,
+-- Bauch (alias Bauchmaschine when at Thomas? but keep), Waden einseitig, Unterarme Curls
+-- All Inclusive Fitness
+-- Hackenschmidt (alias Hackschmitt/Hack Squat), Hip Thrust Machine, Hip Thrust,
+-- Beinstrecker, Beinbeuger, Waden an 45er Presse / Waden horizontal, Bauchmaschine,
+-- Hyperextension, Beinpresse horizontal / Beinpresse / V Squat Machine
+```
+
+Future: bulk import screen `Paste notes → parse → preview → choose gym → create missing machines` to migrate history in one go (out of v1 but parser ready).
 
 ---
 
