@@ -1,11 +1,11 @@
 # AGENTS.md
 
 ## Project
-- Single-module Android app (`:app`) — package `com.example.ul_fitness`, namespace `com.example.ul_fitness`.
+- Single-module Android app (`:app`) — package `com.example.ul_fitness`, namespace `com.example.ul_fitness`; planned KMP migration → `:shared` + `:composeApp` + `:server` per `spec.md:5` (v0.4.1).
 - Entry point: `app/src/main/java/com/example/ul_fitness/MainActivity.java:5` — launcher `Activity` with `activity_main.xml` (dark-only start screen: centered `ic_ul_logo.xml` + "UL FITNESS" title, `AppCompatDelegate.MODE_NIGHT_YES`).
 - AGP 9.3.2, Gradle 9.5.0, compileSdk/targetSdk 37, minSdk 24, `JavaVersion.VERSION_11` (toolchain resolved via foojay `gradle-daemon-jvm.properties` — JDK 25).
 - Version catalog at `gradle/libs.versions.toml` — add deps there, reference via `libs.*` in `app/build.gradle.kts`.
-- No git repo initialized (`git status` fails). No `opencode.json` / CI / lint config.
+- Git: `https://github.com/drepguy/ul-fitness.git` (`main`, `d89c204`+) — private; `spec.md:1` is source of truth (Deutsch, KG, RPE 1-10, 2 Studios). `.env` gitignored (`AGENTS.md:14`).
 
 ## Build & Verify
 - Windows: `.\gradlew.bat <task>` · macOS/Linux: `./gradlew <task>`
