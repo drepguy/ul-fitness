@@ -1,7 +1,7 @@
 # UL Fitness — Spec
 
-**Version:** 0.4.1 — 2026-08-30  
-**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides; 1 Gerät → n Übungen)  
+**Version:** 0.4.2 — 2026-08-30  
+**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides; 1 Gerät → n Übungen; UI einfach→mächtig)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
 ---
@@ -259,31 +259,67 @@ CREATE TABLE workout_template_exercises (
 
 **Edit-Flow:** Gesetzter Satz ist tippbar → Dialog `Wdh/Gewicht/RPE/Notiz` editierbar, `Speichern` überschreibt `sets` (last-write-wins), `Löschen` entfernt Satz; geleertes `workout_exercises` löscht Block. Kein Soft-Delete nötig v1.
 
-## 8. App Spec
+## 8. App Spec — UI: Einfach zuerst, Details auf Knopfdruck (Progressive Disclosure)
 
-**Screens (Compose) — UI Sprache: Deutsch (per decision), Einheiten KG**
-1. **Start** — keep `ic_ul_logo.xml` → Compose vector, `UL FITNESS` title, dark `background_dark #0F0F0F` (unchanged `themes.xml:3`), `AppCompatDelegate.MODE_NIGHT_YES` remains.
-2. **Login/Register** — `E-Mail` + `Passwort`, `Anmelden`/`Registrieren`, `DataStore` token, auto-refresh. Fehlermeldungen Deutsch.
-3. **Home** — Gym-Schnellwahl (`Thomas Sport Center` / `All Inclusive Fitness` Chips, plus `+` neues Studio), CTA `Training starten`, letzte Trainings nach Studio gruppiert, letzter PR.
+**Prinzip:** Standardweg `≤3 Taps/Satz` (große Targets 56dp, Haptik, einhändig), Details (RPE/Notiz/Warmup/Alias/Vorlage) immer ein Tap/Long-Press entfernt. Dunkel `#0F0F0F`, Deutsch.
+
+**Navigation (Bottom, dunkel):** `Start` | `Training` | `Verlauf` | `Fortschritt` | `≡ Verwalten` — `Training` primär (FAB `Training starten`).
+
+**Screens**
+
+1. **Start** — `ic_ul_logo.xml` → Compose Vector, `UL FITNESS` + Akzentlinie (`themes.xml:3`), `MODE_NIGHT_YES`.
+
+2. **Anmelden** — `E-Mail` + `Passwort`, `Anmelden`/`Registrieren`, `DataStore` Token, Auto-Refresh, Fehlermeldungen Deutsch.
+
+3. **Home** — **Gym bestimmt alles** (Logikfix: Vorlage/Letztes sind Studio-gebunden):
+   ```
+   [Thomas Sport Center] [All Inclusive Fitness] [+ Neues Studio]
+   ───────── nach Studio-Wahl ─────────
+   Letztes Training dieses Studios kopieren  → POST /workouts/from-last {gym_id}
+   Vorlagen dieses Studios: [Upper Standard] [Legs PPL] → POST /templates/{id}/start
+   Falls keine: [Leer starten]
+   ─────────────────────────────────────
+   [ Training starten ]  (merkt letztes Studio)
+   Zuletzt: All Inclusive — 26.08 — 6 Übungen
+   PR: Beinpresse 45° 65×10
+   ```
+   Chips oben wählen Gym, darunter erscheinen **nur** passendes `Letztes` + `Vorlagen dieses Studios`.
+
 4. **Training (Fokus)** — *Einfachheit während des Trainings ist #1:*
-   - **Studio-Wahl (erster Schritt):** `Training starten` → Studio wählen (Thomas / All Inclusive / weiter angelegtes). Setzt `workouts.gym_id`, filtert Maschinen. Vor erstem Satz änderbar. Merkt letztes Studio.
-   - **Vorlage/Letztes:** Nach Studio-Wahl Sheet: `Letztes Training kopieren` (befüllt Reihenfolge aus `GET /workouts?gymId=…&limit=1`) **oder** gespeicherte `Vorlagen` dieses Studios (z. B. `Upper Standard`, Chips) → `POST /templates/{id}/start`. Falls keine: `Leer starten`.
-   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` öffnet Sheet: Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. Liste zeigt `Art`-Badge (Gerät vs Freihantel). Alias-Suche findet `Hackschmitt`. Inline `+ Neu anlegen` → Dialog `Name, Kategorie (Push/Pull/Beine/Core...), Art (Freihantel/Gerät/Kabelzug/Eigengewicht), Studio (vorausgefüllt, änderbar), Aliase?` → `POST /exercises`. Optimistisch lokal, Sync-Queue. `Vorlage speichern` Button speichert aktuelle Reihenfolge als neue Vorlage.
-   - Pro Übung: vorheriger Satz als Geist (Tippen = Gewicht kopieren), Wiederholungs-Stepper `−/ +` (groß 56dp), Gewichts-Chips `−2,5/ +2,5 / +5` (**KG**, Komma), Numpad-Fallback, `RPE 1-10` Slider (Ticks 1-10, Label `Leicht…Limit`) + `Muskelversagen` Checkbox, pro Satz `Notiz` (aufklappbares Textfeld), `Satz speichern` Haptik. Parser akzeptiert `12x35kg` **oder** Slider.
-   - Pausentimer: rund `Vico`/`CircularProgress`, `90s` Default (pro Übung gemerkt), Benachrichtigung `+30s / Überspringen` (`POST_NOTIFICATIONS` SDK 37), startet automatisch nach Log, Vibration bei 0.
-   - Swipe zwischen Übungen, sticky Header `Studio • Übung`.
-   - `Beenden` → PATCH `ended_at`; offline → Queue. Zusammenfassung `Studio • Dauer • Volumen (KG)`.
-5. **Verlauf** — paginierte Liste nach Studio gruppiert (Filter `Alle / Thomas / All Inclusive`), Suche (auch Alias), Wischen Löschen, Bearbeiten (lädt ins Training mit gleichem `gym_id`).
-6. **Fortschritt** — Studio-Filter + Übungs-/Geräte-Selektor (nach Studio gefiltert) + `Vico` Liniendiagramm, Zeitraum `4W/12W/1J/Alle`, Metriken `e1RM/Volumen/Max`, PR-Abzeichen, Tabelle Rohsätze mit Studio-Spalte (Warmup ausgegraut, Bodyweight `0` ignoriert für PR/e1RM per Entscheidung).
-7. **Verwalten** — zwei Bereiche: **Studios** (`+` anlegen, eigenes umbenennen) und **Übungen/Geräte** (nach Studio filtern, anlegen, Alias pflegen via `PUT /aliases`). System-Studios Thomas/All Inclusive immer sichtbar.
+   ```
+   Header sticky: All Inclusive Fitness • Hip Thrust Machine  [⋮]
+   ┌─────────────────────────────────────────┐
+   │  Geist: 12×30kg (letztes Mal) [Übernehmen] │
+   │  Satz 1  12×30kg  RPE 8  [ ]MV  [notiz] ✓ │
+   │  Satz 2  10×30kg  RPE 9  [✓]MV  [_____] ○ │
+   │  ─────────────────────────────────────── │
+   │  Wdh  [ −  10  + ]   Gewicht [ −  30,0kg + ] │
+   │  Chips: [−2,5] [+2,5] [+5]  [Numpad]     │
+   │  RPE 1····●····10  Leicht──────Limit [?] │
+   │  [Notiz…]  (klappt auf)                  │
+   │  [ W Warmup ]  [ Satz speichern ★ ]     │
+   │  Pausentimer ○ 01:22  [+30s] [Überspringen] │
+   └─────────────────────────────────────────┘
+   [ + Übung hinzufügen ]  [ Als Vorlage speichern ]
+   ```
+   - **Studio-Wahl:** Erster Schritt nach `Training starten`, setzt `workouts.gym_id` (vor erstem Satz änderbar).
+   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` → Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. Badge `Gerät/Freihantel`, Alias-Suche `Hackschmitt`. `+ Neu anlegen` → Dialog `Name, Kategorie, Art, Studio (vorausgefüllt), Aliase?` → `POST /exercises`.
+   - **Pro Übung:** Geist-Tippen füllt Gewicht, Chips/Numpad (`47,5` Komma), RPE-Slider + `Muskelversagen`, `Satz speichern` Haptik, Parser auch `12x35kg`.
+   - **Pausentimer:** rund, `90s` pro Übung gemerkt, Notification `+30s/Überspringen` (`POST_NOTIFICATIONS` 37), Vibration 0.
+   - **Weitere:** Swipe Übung↔Übung, sticky `Studio • Übung`, `Beenden` → `PATCH ended_at`; offline Queue; Zusammenfassung `Studio • Dauer • Volumen (KG)`; `● Offline` Banner oben wenn `GET http://ai-vm:8080/api/v1/health` fehlschlägt.
+
+5. **Verlauf** — paginiert, nach Studio gruppiert (Filter `Alle / Thomas / All Inclusive`), Suche auch Alias, Wischen Löschen, Tippen → gleiches `gym_id` ins Training laden.
+
+6. **Fortschritt** — Studio-Filter + Übungs-Suche (aliasfähig) + `Vico` Linie, `4W/12W/1J/Alle`, `e1RM/Volumen/Max`, PR-Abzeichen, Tabelle Rohsätze mit Studio-Spalte (Warmup grau, `0kg` ignoriert).
+
+7. **Verwalten** — **Studios** (`+` anlegen) + **Übungen/Geräte** (nach Studio filtern, `+ Neu`, Alias via `PUT /aliases`). System-Studios immer sichtbar.
 
 **Data & sync**
-- **Offline-first:** `SqlDelight` cache is source of truth; `WorkoutRepository` writes locally, `SyncWorker` (WorkManager, `NetworkType.CONNECTED` + tailnet probe `GET /health`) does `POST` pending + `GET /workouts?since=lastSync`. Conflict: last-write-wins (safe for personal).
-- **Reachability check:** `GET http://ai-vm:8080/api/v1/health` (no auth, via LXC subnet route) — if `ai-vm` DNS/`192.168.x.x` via tailnet fails, show `● Offline` Banner (nicht Fehler).
-- **BuildConfig:** `API_BASE_URL = "http://ai-vm:8080/api/v1"` (LAN-Name, nur über Tailscale-Subnet erreichbar, kein MagicDNS `*.ts.net` da `ai-vm` selbst kein Tailscale-Daemon hat), per `buildType` generiert; kein öffentlicher Fallback. `ai-vm` per `ssh ulrich@ai-vm` bereits auflösbar (lokales Netz + Subnet-Advertisement).
-- **Einheiten:** ausschließlich **KG** (`DECIMAL(5,2)`), Parser normalisiert `47,5` → `47.50`; Eingabe zeigt `kg`.
+- **Offline-first:** `SqlDelight` cache source of truth; `WorkoutRepository` lokal, `SyncWorker` (WorkManager + Tailnet-Probe `GET /health`) `POST` pending + `GET ?since=`, last-write-wins. Geräte/Übungen-Anlage optimistisch lokal, aliasfähig.
+- **Reachability:** `GET http://ai-vm:8080/api/v1/health` (LXC Subnet, nur im Tailnet) — sonst `● Offline` Banner.
+- **BuildConfig:** `API_BASE_URL = "http://ai-vm:8080/api/v1"` (LAN-Name, `ssh ulrich@ai-vm` Subnet, kein MagicDNS), `KG` Parser `47,5→47.50`.
 
-**Permissions:** `POST_NOTIFICATIONS` (Pausentimer), `INTERNET`; kein `ACTIVITY_RECOGNITION` in v1. Strings Deutsch (`strings.xml` + Compose `stringsDe`).
+**Permissions:** `POST_NOTIFICATIONS` (Pausentimer), `INTERNET`; kein `ACTIVITY_RECOGNITION` v1. Strings Deutsch. Targets ≥48dp, TalkBack.
 
 ## 9. Visualization
 
