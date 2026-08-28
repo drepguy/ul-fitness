@@ -7,8 +7,9 @@ captures/
 .navigation/
 output-metadata.json
 
-# Local config (SDK path, keystores)
+# Local config (SDK path, keystores, env)
 local.properties
+.env
 *.jks
 *.keystore
 

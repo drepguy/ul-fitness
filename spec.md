@@ -1,7 +1,7 @@
 # UL Fitness — Spec
 
-**Version:** 0.2 — 2026-08-29  
-**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC advertiser; RPE 1-10; 2 gyms + extensible)  
+**Version:** 0.3 — 2026-08-30  
+**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI German, KG, `exercise_aliases`)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
 ---
@@ -46,19 +46,22 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 | Backend | **Ktor 3.1** (Netty) + `Exposed 0.60` + `HikariCP` + `Flyway` | Kotlin sharing, lightweight, personal | — |
 | DB | **MariaDB 11** (Docker) | Required by spec | mariadb:11 |
 | Auth | JWT (access 15m + refresh 30d, `bcrypt`) | Multi-user; Tailscale alone not enough for row isolation | — |
-| Infra | Docker Compose on ai-vm + Caddy or `tailscale serve` | Single compose, reproducible | — |
-| Net | **Tailscale** (existing LXC advertiser, MagicDNS `*.ts.net`) | No new VPN; `100.x.x.x` only | — |
+| Infra | Docker Compose on ai-vm | Single compose, no public ports | — |
+| Net | **Tailscale** (LXC subnet router advertises LAN; `ai-vm` has **no** tailnet daemon; `ssh ulrich@ai-vm` works via subnet) | LXC advertises `ai-vm` subnet; approved in admin console; app reaches `http://ai-vm:8080` via tailnet | — |
+| I18n | **German UI**, units **KG** only, **ignore bodyweight** (weight `0` allowed but not tracked) | Logs/specs are German; parser comma-tolerant | — |
 
 ## 5. Architecture
 
 ```
-composeApp (Android)                    ai-vm (Ubuntu, Docker)
+composeApp (Android, German UI)         ai-vm (Ubuntu, Docker, no Tailscale daemon)
 ┌─ shared/commonMain ─┐                ┌─ docker-compose.yml ─┐
 │ domain/model        │   Ktor client  │ api:ktor:8080 ──► db:3306 (mariadb:11, vol db-data)
-│ data/SqlDelight     │ ──JWT/HTTPS──► │   Exposed+Flyway+JWT  UFW deny 0.0.0.0:8080
-│ ui/Compose (Vico)   │  100.x / *.ts.net │  bind = tailscale0 IP only  Tailnet ACL
-└─────────────────────┘                └──────────────────────┘
+│ data/SqlDelight     │ ──JWT/HTTP───► │   Exposed+Flyway+JWT  LAN-only (via LXC subnet)
+│ ui/Compose (Vico)   │  http://ai-vm:8080 │  bind 0.0.0.0 but firewall/LAN; ACL via LXC subnet
+└─────────────────────┘  (reachable only  └──────────────────────┘
+                         when phone on tailnet, subnet route approved)
          ▲ WorkManager SyncWorker (only when tailnet reachable, last-write-wins)
+                           LXC (Tailscale subnet router, e.g. 192.168.1.0/24) ──► ai-vm
 ```
 
 **Repo layout (planned)**
@@ -130,13 +133,22 @@ CREATE TABLE sets (
   workout_exercise_id BIGINT NOT NULL,
   set_no INT NOT NULL,
   reps INT NOT NULL CHECK (reps >= 0),
-  weight_kg DECIMAL(5,2) NOT NULL CHECK (weight_kg >= 0), -- 0 = bodyweight (e.g. Hyperextension 10x body)
+  weight_kg DECIMAL(5,2) NOT NULL CHECK (weight_kg >= 0), -- 0 = bodyweight (e.g. Hyperextension 10x body) but bodyweight is ignored for stats per decision
   is_warmup BOOLEAN NOT NULL DEFAULT FALSE, -- e.g. "0 und 15kg warmup"
   rpe TINYINT NULL CHECK (rpe BETWEEN 1 AND 10),
   is_failure BOOLEAN NOT NULL DEFAULT FALSE,
   note TEXT NULL, -- per-set note e.g. "oberschenkel Innenseite zieht leicht"
   created_at DATETIME(6) NOT NULL,
   FOREIGN KEY (workout_exercise_id) REFERENCES workout_exercises(id) ON DELETE CASCADE
+);
+CREATE TABLE exercise_aliases (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  exercise_id BIGINT NOT NULL,
+  alias VARCHAR(120) NOT NULL, -- e.g. Hackschmitt → Hackenschmidt, Brust → Brustpresse
+  created_at DATETIME(6) NOT NULL,
+  FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_alias(alias, exercise_id),
+  INDEX idx_alias(alias)
 );
 -- V2 candidate: body_metrics(id,user_id,date,weight_kg,body_fat)
 -- seed in V1 (2 gyms + canonical machines/exercises derived from real logs 2025-2026):
@@ -161,9 +173,11 @@ CREATE TABLE sets (
 
 **Gym modeling:** `gyms` first-class, extensible N. Seed the two current gyms as `is_system` so every user sees them; `Thomas Sport Center` default tag = Upper, `All Inclusive Fitness` = Legs+Core but not enforced — user can do any category at either gym. `exercises.gym_id` distinguishes global free-weights (`NULL`, show at any gym) vs gym-specific machines (e.g. “Chest Press #2” `gym_id=All Inclusive` only appears when that gym is selected; global search can still find it). Validation: `workouts.gym_id` must match or be `NULL` for exercises added to that workout if `exercises.gym_id IS NOT NULL`.
 
-**Conventions:** UTC `DATETIME(6)`, `DECIMAL(5,2)` for kg (allows 999.99). System exercises/machines seeded for both gyms.
+**Alias modeling:** `exercise_aliases` maps typos/variants to canonical exercise (`Hackschmitt→Hackenschmidt`, `Brust→Brustpresse`, `Chest fly→Brustfly`, `Beinpresse horizontal→Beinpresse`). `GET /exercises?q=` searches `exercises.name` **and** `exercise_aliases.alias` (JOIN). Picker shows canonical name with alias hint.
 
-**RPE 1-10:** User decision. `1` = minimal effort / warm-up, `10` = limit / could not do one more rep. `is_failure` separate because failure can happen at any RPE; chart can show RPE trend. Null = not recorded (v1 optional but stored).
+**Conventions:** UTC `DATETIME(6)`, `DECIMAL(5,2)` for **KG only** (allows 999.99, comma `,` normalized to dot before insert). System exercises/machines seeded for both gyms. `weight_kg=0` (bodyweight) stored but **ignored for e1RM/volume** per decision (no bodyweight progression).
+
+**RPE 1-10:** User decision. `1` = minimal effort / warm-up, `10` = limit / could not do one more rep. `is_failure` separate because failure can happen at any RPE; chart can show RPE trend. Null = not recorded (v1 optional but stored). UI shows German labels `Leicht`…`Limit`.
 
 ## 7. API (Ktor, `/api/v1`, JSON, JWT bearer except `/health`, `/auth/*`)
 
@@ -178,10 +192,12 @@ CREATE TABLE sets (
 - `PUT /gyms/{id} {name, city}` (only own gyms) → `200`
 - `DELETE /gyms/{id}` (only own, fails if referenced by workouts unless `?force` migrates)
 
-**Exercises / Machines** (unified)
-- `GET /exercises?gymId=&q=&category=&include_system=true` → `[{id,name,category,kind,gym_id,gym_name,is_system,owner_id}]` — when `gymId` set, returns `gym_id IS NULL` (global) **plus** `gym_id = ?` (machines for that gym), sorted machines last.
-- `POST /exercises {name,category,kind,gym_id?}` → `201 {id}` — `kind=machine` requires `gym_id`; `kind=free_weight/bodyweight` usually `gym_id=NULL` (allow any gym). Validation: `gym_id` must be system or owned by me.
+**Exercises / Machines** (unified, German names)
+- `GET /exercises?gymId=&q=&category=&include_system=true` → `[{id,name,category,kind,gym_id,gym_name,is_system,owner_id,aliases:[...]}]` — when `gymId` set, returns `gym_id IS NULL` (global) **plus** `gym_id = ?` (machines for that gym), sorted machines last. `q` matches `name` **and** `exercise_aliases.alias`.
+- `POST /exercises {name,category,kind,gym_id?,aliases?:[string]}` → `201 {id}` — `kind=machine` requires `gym_id`; `kind=free_weight/bodyweight` usually `gym_id=NULL` (allow any gym). Validation: `gym_id` must be system or owned by me.
 - `PUT /exercises/{id} {name,category,kind,gym_id}` (only own) → `200`
+- `PUT /exercises/{id}/aliases {add:[], remove:[]}` → `200` — manage aliases
+- `GET /exercises/{id}/aliases` → `[{alias}]`
 - `DELETE /exercises/{id}` (only own, soft if referenced)
 
 **Workouts**
@@ -199,27 +215,28 @@ CREATE TABLE sets (
 
 ## 8. App Spec
 
-**Screens (Compose)**
+**Screens (Compose) — UI Sprache: Deutsch (per decision), Einheiten KG**
 1. **Start** — keep `ic_ul_logo.xml` → Compose vector, `UL FITNESS` title, dark `background_dark #0F0F0F` (unchanged `themes.xml:3`), `AppCompatDelegate.MODE_NIGHT_YES` remains.
-2. **Login/Register** — email+password, `DataStore` token, auto-refresh.
-3. **Home** — gym quick-picks (`Thomas Sport Center` / `All Inclusive Fitness` chips, plus `+` for new gym), today CTA `Start workout`, recent workouts grouped by gym, last PR snippet.
-4. **Workout (focus)** — *ease during workout is #1:*
-   - **Gym picker (first step):** `Start workout` → select gym (Thomas / All Inclusive / other created). Choice sets `workouts.gym_id`, determines available machines. Can change before first set. Remembers last gym.
-   - **Exercise/Machine picker:** `+ Add exercise` opens sheet: two tabs/search scopes — `This Gym` (global `gym_id NULL` + machines for this gym) and `All` (global search). List shows `kind` badge (machine vs free_weight). Inline `+ Create new` → dialog `Name, Category (push/pull/legs/core...), Kind (free_weight/machine/cable/bodyweight), Gym (pre-filled current, editable)` → `POST /exercises`. Optimistic local insert, queued sync.
-   - Per exercise block: previous set ghost (tap to copy weight), reps stepper `−/ +` (big 56dp), weight chips `−2.5/ +2.5 / +5`, numpad fallback, `RPE 1-10` slider (ticks 1-10 labels) + `Failure` checkbox, per-set `note` (expandable `TextField`), `Log set` haptic.
-   - Rest timer: circular `Vico`/`CircularProgress`, `90s` default (per-exercise remember), notification `Add 30s / Skip` (`POST_NOTIFICATIONS` on SDK 37), auto-start on log, vibrate at 0.
-   - Swipe between exercises, sticky exercise header with `gym_name • exercise_name`.
-   - `Finish` → PATCH `ended_at`; offline → queue. Shows summary `Gym • duration • volume`.
-5. **History** — paged list grouped by gym (filter chip `All / Thomas / All Inclusive`), search, swipe delete, edit (reload into Workout with same `gym_id`).
-6. **Progress** — gym filter + exercise/machine selector (filtered by gym) + `Vico` line chart, period `4W/12W/1Y/All`, metrics `e1RM/Volume/Max`, PR badges, table of raw sets with gym column.
-7. **Manage** — two sections: **Gyms** (`+` create, rename own, hides system only via filter) and **Exercises/Machines** (filter by gym chip, create, hide system). Seed management: system Thomas/All Inclusive always visible.
+2. **Login/Register** — `E-Mail` + `Passwort`, `Anmelden`/`Registrieren`, `DataStore` token, auto-refresh. Fehlermeldungen Deutsch.
+3. **Home** — Gym-Schnellwahl (`Thomas Sport Center` / `All Inclusive Fitness` Chips, plus `+` neues Studio), CTA `Training starten`, letzte Trainings nach Studio gruppiert, letzter PR.
+4. **Training (Fokus)** — *Einfachheit während des Trainings ist #1:*
+   - **Studio-Wahl (erster Schritt):** `Training starten` → Studio wählen (Thomas / All Inclusive / weiter angelegtes). Setzt `workouts.gym_id`, filtert Maschinen. Vor erstem Satz änderbar. Merkt letztes Studio.
+   - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` öffnet Sheet: Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. Liste zeigt `Art`-Badge (Gerät vs Freihantel). Alias-Suche findet `Hackschmitt`. Inline `+ Neu anlegen` → Dialog `Name, Kategorie (Push/Pull/Beine/Core...), Art (Freihantel/Gerät/Kabelzug/Eigengewicht), Studio (vorausgefüllt, änderbar), Aliase?` → `POST /exercises`. Optimistisch lokal, Sync-Queue.
+   - Pro Übung: vorheriger Satz als Geist (Tippen = Gewicht kopieren), Wiederholungs-Stepper `−/ +` (groß 56dp), Gewichts-Chips `−2,5/ +2,5 / +5` (**KG**, Komma), Numpad-Fallback, `RPE 1-10` Slider (Ticks 1-10, Label `Leicht…Limit`) + `Muskelversagen` Checkbox, pro Satz `Notiz` (aufklappbares Textfeld), `Satz speichern` Haptik. Parser akzeptiert `12x35kg` **oder** Slider.
+   - Pausentimer: rund `Vico`/`CircularProgress`, `90s` Default (pro Übung gemerkt), Benachrichtigung `+30s / Überspringen` (`POST_NOTIFICATIONS` SDK 37), startet automatisch nach Log, Vibration bei 0.
+   - Swipe zwischen Übungen, sticky Header `Studio • Übung`.
+   - `Beenden` → PATCH `ended_at`; offline → Queue. Zusammenfassung `Studio • Dauer • Volumen (KG)`.
+5. **Verlauf** — paginierte Liste nach Studio gruppiert (Filter `Alle / Thomas / All Inclusive`), Suche (auch Alias), Wischen Löschen, Bearbeiten (lädt ins Training mit gleichem `gym_id`).
+6. **Fortschritt** — Studio-Filter + Übungs-/Geräte-Selektor (nach Studio gefiltert) + `Vico` Liniendiagramm, Zeitraum `4W/12W/1J/Alle`, Metriken `e1RM/Volumen/Max`, PR-Abzeichen, Tabelle Rohsätze mit Studio-Spalte (Warmup ausgegraut, Bodyweight `0` ignoriert für PR/e1RM per Entscheidung).
+7. **Verwalten** — zwei Bereiche: **Studios** (`+` anlegen, eigenes umbenennen) und **Übungen/Geräte** (nach Studio filtern, anlegen, Alias pflegen via `PUT /aliases`). System-Studios Thomas/All Inclusive immer sichtbar.
 
 **Data & sync**
 - **Offline-first:** `SqlDelight` cache is source of truth; `WorkoutRepository` writes locally, `SyncWorker` (WorkManager, `NetworkType.CONNECTED` + tailnet probe `GET /health`) does `POST` pending + `GET /workouts?since=lastSync`. Conflict: last-write-wins (safe for personal).
-- **Reachability check:** `GET https://<MagicDNS>/api/v1/health` (no auth) — if `100.x` DNS fails, show `● Offline` banner (not error).
-- **BuildConfig:** `API_BASE_URL = "https://ul-fitness.<tailnet>.ts.net/api/v1"` (or `ai-vm.<tailnet>.ts.net`), generated per buildType; no public fallback.
+- **Reachability check:** `GET http://ai-vm:8080/api/v1/health` (no auth, via LXC subnet route) — if `ai-vm` DNS/`192.168.x.x` via tailnet fails, show `● Offline` Banner (nicht Fehler).
+- **BuildConfig:** `API_BASE_URL = "http://ai-vm:8080/api/v1"` (LAN-Name, nur über Tailscale-Subnet erreichbar, kein MagicDNS `*.ts.net` da `ai-vm` selbst kein Tailscale-Daemon hat), per `buildType` generiert; kein öffentlicher Fallback. `ai-vm` per `ssh ulrich@ai-vm` bereits auflösbar (lokales Netz + Subnet-Advertisement).
+- **Einheiten:** ausschließlich **KG** (`DECIMAL(5,2)`), Parser normalisiert `47,5` → `47.50`; Eingabe zeigt `kg`.
 
-**Permissions:** `POST_NOTIFICATIONS` (rest timer), `INTERNET`; no `ACTIVITY_RECOGNITION` in v1.
+**Permissions:** `POST_NOTIFICATIONS` (Pausentimer), `INTERNET`; kein `ACTIVITY_RECOGNITION` in v1. Strings Deutsch (`strings.xml` + Compose `stringsDe`).
 
 ## 9. Visualization
 
@@ -230,19 +247,23 @@ CREATE TABLE sets (
 - X: date, Y: kg / kg×reps. Markers: PRs with label, failed sets dimmed, gym color dot. Table below chart for raw export (CSV later) with gym column.
 - Gym filter chip (`All / Thomas Sport Center / All Inclusive Fitness`) narrows picker and chart; e.g. Leg Press at All Inclusive vs generic Squat shows distinct lines. `GET /stats/progress?gymId=` powers it.
 
-## 10. Tailscale Networking
+## 10. Tailscale Networking — Subnet Router (kein Daemon auf `ai-vm`)
 
-- Existing LXC advertiser already distributes `ai-vm` subnet to tailnet — no new VPN install.
-- **ACL (`tailnet policy`):** `{"src":["tag:ul-fitness-phone","autogroup:member"],"dst":["tag:ai-vm:8080,3306"]}` (restrict DB to api only in practice).
-- **DNS:** MagicDNS `ai-vm.<tailnet>.ts.net` → `100.x.x.x`; app uses HTTPS. No `0.0.0.0` exposure.
-- **Phone:** Install Tailscale, login same tailnet, approve subnet routes.
+**Antwort auf deine Frage:** Nein, Tailscale muss **nicht** auf `ai-vm` laufen. Dein **LXC Subnet-Router** reicht völlig — er advertiert das LAN-Subnetz (z. B. `192.168.1.0/24` oder `ai-vm/32`), wird im Admin-Console **approved**, und Tailnet-Geräte erreichen `ai-vm` via `http://ai-vm:8080` (oder `192.168.1.x`) **nur wenn sie im Tailnet sind**. `ssh ulrich@ai-vm` funktioniert deshalb auch nur noch via Tailnet, wenn du die Route aktivierst.
+
+- **LXC:** `tailscale up --advertise-routes=192.168.0.0/24` (oder konkretes Subnetz von `ai-vm`), dann in `https://login.tailscale.com/admin/machines` → `Edit route settings` → `Approve`.
+- **ACL (`tailnet policy_tailnet.json`):** `{"src":["tag:ul-fitness-phone","autogroup:member"],"dst":["192.168.0.0/24:8080"]}` (DB `3306` nicht exponieren — nur api via subnet). Kein `0.0.0.0` Public.
+- **DNS:** Kein MagicDNS `*.ts.net` für `ai-vm` selbst (daheim kein Daemon → kein `100.x`). App nutzt **`http://ai-vm:8080/api/v1`** (LAN-Name, via Tailnet DNS/Subnet). Phone im Tailnet löst `ai-vm` via lokalen DNS durchs Subnetz. Fallback: `http://<LAN-IP>:8080`.
+- **Verschlüsselung:** WireGuard verschlüsselt trotzdem den Tailnet-Tunnel, daher reicht **HTTP** im Tailnet (optional Caddy mit self-signed für `https://ai-vm` wenn gewünscht, aber nicht nötig).
+- **Phone:** Tailscale installieren, selbes Tailnet, `Use subnet routes` aktivieren. Ohne Tailnet ist `ai-vm:8080` unerreichbar — genau die gewünschte Private-Only-Garantie.
+- **Vorteil kein Daemon auf ai-vm:** Weniger Pflege auf ai-vm; Nachteil: kein `tailscale serve` HTTPS/Auto-Cert, kein `100.x` — deshalb hier `http` + Subnet.
 
 ## 11. Security & Private-Only
 
-- **Perimeter:** `api` container binds **only** to `tailscale0` IP (compose `network_mode: host` + `HOST=100.x` or `ports: ["100.x:8080:8080"]`), `UFW` `deny 8080/tcp` from public; `docker-compose` not exposing DB.
-- **App:** JWT stored `EncryptedSharedPreferences`/`DataStore`, refresh. `network_security_config.xml` pins Tailscale CA / uses Tailscale-issued cert (Caddy). `BuildConfig` check fails build if URL not `*.ts.net`/`100.*`.
-- **Not runnable elsewhere:** Without tailnet cert + route, API unreachable. Optional extra: validate `Tailscale-User-Login` header server-side.
-- **Secrets:** `.env` (`JWT_SECRET`, `MARIADB_ROOT_PASSWORD`) gitignored (`.gitignore:11` already `local.properties`; add `.env`).
+- **Perimeter:** `api` container lauscht auf `0.0.0.0:8080` aber ist nur via LAN/Subnet erreichbar — kein Port-Forward, kein öffentlicher DNS. `UFW` `deny 8080/tcp` nur für öffentliches Interface (Tailnet/LAN via Subnet bleibt erlaubt); `docker-compose` exponiert DB nicht. Beste Garantie ist **kein öffentliches Routing** + **Tailscale Subnet** als einziges Gateway.
+- **App:** JWT in `EncryptedSharedPreferences`/`DataStore`, Refresh. `network_security_config.xml` erlaubt `http://ai-vm` im Tailnet (cleartext, da WireGuard bereits verschlüsselt). `BuildConfig` Check: fails if URL not `ai-vm`/`192.168.*`.
+- **Not runnable elsewhere:** Ohne aktives Tailnet + genehmigte Subnet-Route ist `ai-vm:8080` nicht routbar — genau private-only. Kein Funnel/Serve nötig weil kein Daemon auf ai-vm.
+- **Secrets:** `.env` (`JWT_SECRET`, `MARIADB_ROOT_PASSWORD`) gitignored (`.gitignore` + `.env`).
 
 ## 12. Deployment (ai-vm, Docker)
 
@@ -267,16 +288,17 @@ services:
 volumes: { db-data: {} }
 ```
 
-**TLS:** `tailscale serve --https=443 --bg localhost:8080` **or** Caddy with Tailscale certs. Prefer `tailscale serve` (no extra cert handling).
+**TLS:** Kein `tailscale serve` auf `ai-vm` möglich (kein Daemon) → **HTTP im Tailnet** (WireGuard verschlüsselt) genügt. Optional Caddy mit self-signed `https://ai-vm` wenn gewünscht.
 
 **Deploy:**
 ```bash
-# on ai-vm over Tailscale SSH
+# on ai-vm (LAN via LXC subnet, works only when you are on tailnet: ssh ulrich@ai-vm)
 git clone https://github.com/drepguy/ul-fitness.git && cd ul-fitness
 cp .env.example .env && $EDITOR .env
 docker compose up -d --build
 docker compose logs -f api
-curl -k https://<MagicDNS>/api/v1/health # {"status":"ok"}
+curl http://ai-vm:8080/api/v1/health # {"status":"ok"}  # nur im Tailnet/Subnet
+# vom Handy (Tailnet an, Subnet genehmigt): http://ai-vm:8080/api/v1/health
 ```
 
 **Backup:** `docker exec ul-fitness-db-1 mariadb-dump ul_fitness | gzip > backup.sql.gz` (cron weekly to ai-vm volume).
@@ -301,10 +323,12 @@ docker compose up --build
 
 ## 14. Config
 
-- `.env` (gitignored): `MARIADB_ROOT_PASSWORD`, `MARIADB_USER`, `MARIADB_PASSWORD`, `JWT_SECRET` (32+ chars), `HOST_TAILSCALE_IP`.
+- `.env` (gitignored, **KG-only**, **deutsch**): `MARIADB_ROOT_PASSWORD`, `MARIADB_USER`, `MARIADB_PASSWORD`, `JWT_SECRET` (32+ chars), `API_HOST=ai-vm` (LAN-Name via Subnet).
 - `local.properties`: `sdk.dir=C\:\\AndroidSDK` (existing, gitignored).
+- **Aliase:** `exercise_aliases` Tabelle, Seed z. B. `Hackschmitt→Hackenschmidt`.
+- **Bodyweight:** ignoriert für Stats (`weight_kg=0` → nicht in e1RM/Volumen).
 
-Add to `.gitignore`: `.env` (todo).
+Add to `.gitignore`: `.env` (todo — next commit).
 
 ## 15. Testing
 
