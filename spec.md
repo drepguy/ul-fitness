@@ -16,13 +16,13 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 
 ## 2. Goals / Non-Goals
 
-**Goals**
+ **Goals**
 - Log a set in <3 taps, one-handed, with sweaty fingers; rest timer keeps you moving.
-- **Gym-aware logging:** choose gym at workout start, then picker shows only relevant exercises/machines for that gym (+ search globally); create new exercise/machine inline (with gym binding).
+- **Gym-aware logging:** choose gym at workout start, then picker shows only relevant exercises/machines for that gym (+ search globally/aliases); create new exercise/machine inline (with gym binding).
 - Reliable offline: log without signal/VPN, sync when back on Tailnet.
-- Honest progress charts (e1RM, volume, PRs) per exercise/machine, filterable by gym.
-- Private by construction: API/DB never on public internet; VPN is the perimeter.
-- Multi-user from schema day one (FK `user_id` everywhere, gyms/exercises per user or system).
+- Honest progress charts (e1RM, volume, PRs) per exercise/machine, filterable by gym (Warmup + Bodyweight `0` ignoriert).
+- Private by construction: API/DB never on public internet; Subnet-Router ist das Gateway.
+- Schema bereit für Multi-User (FK `user_id` überall, `gyms`/`exercises` per user/system) — **v1 aber nur du** (`ALLOW_REGISTER=false`).
 
 **Non-Goals**
 - Public distribution, App-Store compliance, analytics, ads.
@@ -53,25 +53,25 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 ## 5. Architecture
 
 ```
-composeApp (Android, German UI)         ai-vm (Ubuntu, Docker, no Tailscale daemon)
-┌─ shared/commonMain ─┐                ┌─ docker-compose.yml ─┐
+composeApp (Android, Deutsch)           ai-vm (Ubuntu, Docker, kein Tailscale-Daemon)
+┌─ shared/commonMain ─┐                ┌─ ~/ul-fitness/docker-compose.yml ─┐
 │ domain/model        │   Ktor client  │ api:ktor:8080 ──► db:3306 (mariadb:11, vol db-data)
-│ data/SqlDelight     │ ──JWT/HTTP───► │   Exposed+Flyway+JWT  LAN-only (via LXC subnet)
-│ ui/Compose (Vico)   │  http://ai-vm:8080 │  bind 0.0.0.0 but firewall/LAN; ACL via LXC subnet
-└─────────────────────┘  (reachable only  └──────────────────────┘
-                         when phone on tailnet, subnet route approved)
-         ▲ WorkManager SyncWorker (only when tailnet reachable, last-write-wins)
-                           LXC (Tailscale subnet router, e.g. 192.168.1.0/24) ──► ai-vm
+│ data/SqlDelight     │ ──JWT/HTTP───► │   Exposed+Flyway+JWT  LAN-only (via LXC Subnet)
+│ ui/Compose (Vico)   │  http://ai-vm:8080 │  0.0.0.0:8080, kein Port-Forward, kein MagicDNS
+└─────────────────────┘  (nur via Tailnet └──────────────────────────────┘
+                         + genehmigte Subnet-Route erreichbar)
+         ▲ WorkManager SyncWorker (nur wenn Tailnet/Subnet erreichbar, last-write-wins)
+                           LXC (Tailscale Subnet-Router, z. B. 192.168.1.0/24) ──► ai-vm
 ```
 
-**Repo layout (planned)**
+ **Repo layout (planned)**
 ```
 settings.gradle.kts → include(":shared", ":composeApp", ":server")
 gradle/libs.versions.toml → kotlin, compose-jb, ktor, sqlDelight, vico, koin
-shared/  → commonMain(domain, data db/api, ui screens/viewmodels)
+shared/  → commonMain(domain, data db/api, ui screens/viewmodels + German strings)
 composeApp/ → androidMain (ComponentActivity setContent{ UlFitnessApp() })
 server/  → src/main/kotlin (ktor app, routes, exposed entities, flyway V1__*.sql), Dockerfile
-docker-compose.yml, .env (gitignored: JWT_SECRET, DB_PASSWORD), Caddyfile (optional)
+docker-compose.yml, .env (gitignored: JWT_SECRET, DB_PASSWORD) — kein Caddy nötig (HTTP im Tailnet)
 ```
 
 ## 6. Data Model (MariaDB, Flyway)
@@ -241,7 +241,9 @@ CREATE TABLE workout_template_exercises (
 - `GET /stats/progress?exerciseId=&gymId=&period=90d&metric=e1RM|volume|max` → `[{date, value, reps, weight_kg}]` (`e1RM = weight*(1+reps/30)` Epley; volume = Σ `reps*weight`) — `gymId` optional filter.
 - `GET /stats/prs?exerciseId=&gymId=` → `{maxWeight:{value,date,gym}, maxE1RM:{}, maxVolume:{}}`
 
-**Conventions:** `401` on bad JWT, `403` on not own resource, `409` on duplicate `(owner,gym,name)` or machine-gym mismatch, `X-Request-Id` logs.
+ **Conventions:** `401` on bad JWT, `403` on not own resource, `409` on duplicate `(owner,gym,name)` or machine-gym mismatch, `400` on invalid `gym_id`/parsing, `X-Request-Id` logs. Pagination: `limit` default `20` (max `100`), `offset` default `0`; `since` ist ISO-8601 `DATETIME(6)` für Sync.
+
+**Edit-Flow:** Gesetzter Satz ist tippbar → Dialog `Wdh/Gewicht/RPE/Notiz` editierbar, `Speichern` überschreibt `sets` (last-write-wins), `Löschen` entfernt Satz; geleertes `workout_exercises` löscht Block. Kein Soft-Delete nötig v1.
 
 ## 8. App Spec
 
@@ -271,12 +273,12 @@ CREATE TABLE workout_template_exercises (
 
 ## 9. Visualization
 
-- Library: `Vico 2.0` (CMP). Single chart per exercise/machine, three toggles:
-  - **e1RM** (primary) — `weight*(1+reps/30)`, smoothed 7d avg.
-  - **Total volume** — `Σ reps*weight` per session.
-  - **Max weight** — top set per session.
-- X: date, Y: kg / kg×reps. Markers: PRs with label, failed sets dimmed, gym color dot. Table below chart for raw export (CSV later) with gym column.
-- Gym filter chip (`All / Thomas Sport Center / All Inclusive Fitness`) narrows picker and chart; e.g. Leg Press at All Inclusive vs generic Squat shows distinct lines. `GET /stats/progress?gymId=` powers it.
+- Library: `Vico 2.0` (CMP). Single chart per exercise/machine, drei Toggles:
+  - **e1RM** (primär) — `weight*(1+reps/30)`, 7d geglättet; Warmup (`is_warmup`) + `weight_kg=0` (Bodyweight) **ausgeschlossen**.
+  - **Gesamtvolumen** — `Σ reps*weight` pro Einheit.
+  - **Maximalgewicht** — schwerster Arbeitssatz pro Einheit.
+- X: Datum, Y: kg / kg×Wdh. Marker: PRs gelabelt, `is_failure` blass, Studio-Farbpunkt. Tabelle darunter für Roh-Export (CSV später) mit Studio-Spalte.
+- Studio-Filter-Chip (`Alle / Thomas Sport Center / All Inclusive Fitness`) filtert Picker und Chart; z. B. Beinpresse bei All Inclusive vs generisch Kniebeuge eigene Linien. `GET /stats/progress?gymId=` liefert Daten.
 
 ## 10. Tailscale Networking — Subnet Router (kein Daemon auf `ai-vm`)
 
@@ -307,16 +309,16 @@ services:
     env_file: .env
     environment:
       MARIADB_DATABASE: ul_fitness
-    volumes: [db-data:/var/lib/mysql, ./sql:/docker-entrypoint-initdb.d]
+    volumes: [db-data:/var/lib/mysql]
     restart: unless-stopped
   api:
     build: ./server
-    env_file: .env # DB_URL=jdbc:mariadb://db:3306/ul_fitness, JWT_SECRET, TAILSCALE_HOST
+    env_file: .env # DB_URL=jdbc:mariadb://db:3306/ul_fitness, JWT_SECRET, ALLOW_REGISTER=false
     depends_on: [db]
-    network_mode: host # binds to tailscale0 via $HOST
+    ports: ["8080:8080"] # LAN-only via LXC Subnet, kein Host-Tailscale, kein 0.0.0.0 public
     restart: unless-stopped
-    # no public ports
 volumes: { db-data: {} }
+# .env enthält: MARIADB_ROOT_PASSWORD, MARIADB_USER/PASSWORD, JWT_SECRET
 ```
 
 **TLS:** Kein `tailscale serve` auf `ai-vm` möglich (kein Daemon) → **HTTP im Tailnet** (WireGuard verschlüsselt) genügt per Entscheidung. Optional Caddy self-signed später.
@@ -354,12 +356,11 @@ docker compose up --build
 
 ## 14. Config
 
-- `.env` (gitignored, **KG-only**, **deutsch**): `MARIADB_ROOT_PASSWORD`, `MARIADB_USER`, `MARIADB_PASSWORD`, `JWT_SECRET` (32+ chars), `API_HOST=ai-vm` (LAN-Name via Subnet).
+- `.env` (gitignored, **KG-only**, **deutsch**): `MARIADB_ROOT_PASSWORD`, `MARIADB_USER`, `MARIADB_PASSWORD`, `JWT_SECRET` (32+ chars), `ALLOW_REGISTER=false`, `API_HOST=ai-vm` (LAN-Name via Subnet).
 - `local.properties`: `sdk.dir=C\:\\AndroidSDK` (existing, gitignored).
 - **Aliase:** `exercise_aliases` Tabelle, Seed z. B. `Hackschmitt→Hackenschmidt`.
 - **Bodyweight:** ignoriert für Stats (`weight_kg=0` → nicht in e1RM/Volumen).
-
-Add to `.gitignore`: `.env` (todo — next commit).
+- **Erledigt:** `.env` bereits in `.gitignore:12` (Commit `29feeaa`).
 
 ## 15. Testing
 
