@@ -12,6 +12,10 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.format.DateTimeFormatter
+import kotlinx.serialization.Serializable
+
+@Serializable data class ProgressPointDto(val date: String, val e1RM: Double, val volume: Double, val maxWeight: Double, val reps: Int)
+@Serializable data class PrDto(val maxWeight: Double, val maxWeightDate: String?)
 
 fun Route.statsRoutes() {
     authenticate("auth-jwt") {
@@ -29,12 +33,12 @@ fun Route.statsRoutes() {
                         val weight = it[Sets.weightKg].toDouble()
                         val e1RM = weight * (1 + reps / 30.0)
                         val volume = reps * weight
-                        mapOf(
-                            "date" to it[Workouts.startedAt].format(DateTimeFormatter.ISO_DATE_TIME),
-                            "e1RM" to e1RM,
-                            "volume" to volume,
-                            "maxWeight" to weight,
-                            "reps" to reps
+                        ProgressPointDto(
+                            date = it[Workouts.startedAt].format(DateTimeFormatter.ISO_DATE_TIME),
+                            e1RM = e1RM,
+                            volume = volume,
+                            maxWeight = weight,
+                            reps = reps
                         )
                     }
                 q
@@ -49,7 +53,7 @@ fun Route.statsRoutes() {
                     .selectAll().where { (Workouts.userId eq uid) and (WorkoutExercises.exerciseId eq exerciseId) and (Sets.isWarmup eq false) }
                     .map { it[Sets.weightKg].toDouble() to it[Workouts.startedAt] }
                 val maxW = sets.maxByOrNull { it.first }
-                mapOf("maxWeight" to (maxW?.first ?: 0), "maxWeightDate" to maxW?.second?.toString())
+                PrDto(maxW?.first ?: 0.0, maxW?.second?.toString())
             }
             call.respond(data)
         }

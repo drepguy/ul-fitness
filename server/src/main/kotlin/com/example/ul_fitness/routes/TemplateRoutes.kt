@@ -19,6 +19,8 @@ import java.time.LocalDateTime
 
 @Serializable data class TemplateExerciseInput(val exerciseId: Long, val orderIdx: Int, val defaultSets: Int = 3, val defaultReps: Int? = null, val defaultWeightKg: Double? = null)
 @Serializable data class CreateTemplateRequest(val gymId: Long, val name: String, val exercises: List<TemplateExerciseInput>)
+@Serializable data class TemplateExerciseDto(val exerciseId: Long, val name: String, val iconKey: String, val orderIdx: Int)
+@Serializable data class TemplateDto(val id: Long, val name: String, val gymId: Long, val exercises: List<TemplateExerciseDto>)
 
 fun Route.templateRoutes() {
     authenticate("auth-jwt") {
@@ -30,9 +32,9 @@ fun Route.templateRoutes() {
                 q.map { t ->
                     val exs = WorkoutTemplateExercises.selectAll().where { WorkoutTemplateExercises.templateId eq t[WorkoutTemplates.id] }.orderBy(WorkoutTemplateExercises.orderIdx to SortOrder.ASC).map {
                         val ex = Exercises.selectAll().where { Exercises.id eq it[WorkoutTemplateExercises.exerciseId] }.single()
-                        mapOf("exerciseId" to ex[Exercises.id], "name" to ex[Exercises.name], "iconKey" to ex[Exercises.iconKey], "orderIdx" to it[WorkoutTemplateExercises.orderIdx])
+                        TemplateExerciseDto(ex[Exercises.id], ex[Exercises.name], ex[Exercises.iconKey], it[WorkoutTemplateExercises.orderIdx])
                     }
-                    mapOf("id" to t[WorkoutTemplates.id], "name" to t[WorkoutTemplates.name], "gymId" to t[WorkoutTemplates.gymId], "exercises" to exs)
+                    TemplateDto(t[WorkoutTemplates.id], t[WorkoutTemplates.name], t[WorkoutTemplates.gymId], exs)
                 }
             }
             call.respond(rows)
