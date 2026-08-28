@@ -47,21 +47,21 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 | DB | **MariaDB 11** (Docker) | Required by spec | mariadb:11 |
 | Auth | JWT (access 15m + refresh 30d, `bcrypt`) | Multi-user; Tailscale alone not enough for row isolation | — |
 | Infra | Docker Compose on ai-vm | Single compose, no public ports | — |
-| Net | **Tailscale** (LXC subnet router advertises LAN; `ai-vm` has **no** tailnet daemon; `ssh ulrich@ai-vm` works via subnet) | LXC advertises `ai-vm` subnet; approved in admin console; app reaches `http://ai-vm:8080` via tailnet | — |
+| Net | **Tailscale** (LXC subnet router advertises LAN; `ai-vm` has **no** tailnet daemon; `ssh ulrich@ai-vm` works via subnet) | LXC advertises `192.168.178.0/24` (approved); app reaches `http://192.168.178.8:8080` via tailnet ( `ai-vm` hostname löst am Handy via Subnet nicht — IP ist Quelle der Wahrheit) | — |
 | I18n | **German UI**, units **KG** only, **ignore bodyweight** (weight `0` allowed but not tracked) | Logs/specs are German; parser comma-tolerant | — |
 
 ## 5. Architecture
 
 ```
-composeApp (Android, Deutsch)           ai-vm (Ubuntu, Docker, kein Tailscale-Daemon)
+composeApp (Android, Deutsch)           ai-vm (192.168.178.8, Ubuntu, Docker, kein Tailscale-Daemon)
 ┌─ shared/commonMain ─┐                ┌─ ~/ul-fitness/docker-compose.yml ─┐
 │ domain/model        │   Ktor client  │ api:ktor:8080 ──► db:3306 (mariadb:11, vol db-data)
 │ data/SqlDelight     │ ──JWT/HTTP───► │   Exposed+Flyway+JWT  LAN-only (via LXC Subnet)
-│ ui/Compose (Vico)   │  http://ai-vm:8080 │  0.0.0.0:8080, kein Port-Forward, kein MagicDNS
+│ ui/Compose (Vico)   │  http://192.168.178.8:8080 │  0.0.0.0:8080, kein Port-Forward, kein MagicDNS
 └─────────────────────┘  (nur via Tailnet └──────────────────────────────┘
-                         + genehmigte Subnet-Route erreichbar)
+                         + genehmigte Subnet-Route 192.168.178.0/24 erreichbar)
          ▲ WorkManager SyncWorker (nur wenn Tailnet/Subnet erreichbar, last-write-wins)
-                           LXC (Tailscale Subnet-Router, z. B. 192.168.1.0/24) ──► ai-vm
+                           LXC (100.88.114.99, Subnet-Router 192.168.178.0/24) ──► ai-vm (192.168.178.8)
 ```
 
  **Repo layout (planned)**
@@ -311,7 +311,7 @@ CREATE TABLE workout_template_exercises (
    - **Übungs-/Geräte-Picker:** `+ Übung hinzufügen` → Tabs `Dieses Studio` (global `gym_id NULL` + Maschinen dieses Studios) und `Alle`. **Zeile: Icon `ic_exercise_<icon_key>` links + Name + Badge `Gerät/Freihantel`**, Alias-Suche `Hackschmitt`. `+ Neu anlegen` → Dialog **Icon wählen (Grid 16)** + `Name, Kategorie, Art, Studio (vorausgefüllt), Aliase?` → `POST /exercises {icon_key}`. Optimistisch lokal.
    - **Pro Übung:** Header `Icon + Name + Gym`. Geist-Tippen füllt Gewicht, Chips/Numpad (`47,5` Komma), RPE-Slider + `Muskelversagen`, `Satz speichern` Haptik, Parser auch `12x35kg`.
    - **Pausentimer:** rund, `90s` pro Übung gemerkt, Notification `+30s/Überspringen` (`POST_NOTIFICATIONS` 37), Vibration 0.
-   - **Weitere:** Swipe Übung↔Übung, sticky `Studio • Übung`, `Beenden` → `PATCH ended_at`; offline Queue; Zusammenfassung `Studio • Dauer • Volumen (KG)`; `● Offline` Banner oben wenn `GET http://ai-vm:8080/api/v1/health` fehlschlägt.
+   - **Weitere:** Swipe Übung↔Übung, sticky `Studio • Übung`, `Beenden` → `PATCH ended_at`; offline Queue; Zusammenfassung `Studio • Dauer • Volumen (KG)`; `● Offline` Banner oben wenn `GET http://192.168.178.8:8080/api/v1/health` fehlschlägt.
 
 5. **Verlauf** — paginiert, nach Studio gruppiert (Filter `Alle / Thomas / All Inclusive`), **Zeile mit Icon** + Suche auch Alias, Wischen Löschen, Tippen → gleiches `gym_id` ins Training laden.
 
@@ -321,8 +321,8 @@ CREATE TABLE workout_template_exercises (
 
 **Data & sync**
 - **Offline-first:** `SqlDelight` cache source of truth; `WorkoutRepository` lokal, `SyncWorker` (WorkManager + Tailnet-Probe `GET /health`) `POST` pending + `GET ?since=`, last-write-wins. Geräte/Übungen-Anlage optimistisch lokal, aliasfähig.
-- **Reachability:** `GET http://ai-vm:8080/api/v1/health` (LXC Subnet, nur im Tailnet) — sonst `● Offline` Banner.
-- **BuildConfig:** `API_BASE_URL = "http://ai-vm:8080/api/v1"` (LAN-Name, `ssh ulrich@ai-vm` Subnet, kein MagicDNS), `KG` Parser `47,5→47.50`.
+- **Reachability:** `GET http://192.168.178.8:8080/api/v1/health` (LXC Subnet 192.168.178.0/24, nur im Tailnet — Handy via VPN verifiziert 30.08; `ai-vm` Hostname via Subnet-DNS am Handy nicht auflösbar) — sonst `● Offline` Banner.
+- **BuildConfig:** `API_BASE_URL = "http://192.168.178.8:8080/api/v1"` (`ssh ulrich@ai-vm` geht via LAN, aber App nutzt IP — am Handy verifiziert; kein MagicDNS), `KG` Parser `47,5→47.50`.
 
 **Permissions:** `POST_NOTIFICATIONS` (Pausentimer), `INTERNET`; kein `ACTIVITY_RECOGNITION` v1. Strings Deutsch. Targets ≥48dp, TalkBack.
 
@@ -341,7 +341,7 @@ CREATE TABLE workout_template_exercises (
 
 - **LXC:** `tailscale up --advertise-routes=192.168.0.0/24` (oder konkretes Subnetz von `ai-vm`), dann in `https://login.tailscale.com/admin/machines` → `Edit route settings` → `Approve`.
 - **ACL (`tailnet policy_tailnet.json`):** `{"src":["tag:ul-fitness-phone","autogroup:member"],"dst":["192.168.0.0/24:8080"]}` (DB `3306` nicht exponieren — nur api via subnet). Kein `0.0.0.0` Public.
-- **DNS:** Kein MagicDNS `*.ts.net` für `ai-vm` selbst (daheim kein Daemon → kein `100.x`). App nutzt **`http://ai-vm:8080/api/v1`** (LAN-Name, via Tailnet DNS/Subnet). Phone im Tailnet löst `ai-vm` via lokalen DNS durchs Subnetz. Fallback: `http://<LAN-IP>:8080`.
+- **DNS:** Kein MagicDNS `*.ts.net` für `ai-vm` selbst (daheim kein Daemon → kein `100.x`). App nutzt **`http://192.168.178.8:8080/api/v1`** (verifiziert am Handy via VPN 30.08; `http://ai-vm:8080` geht nur lokal/PC, nicht via Handy-Subnet). Fallback: `ai-vm` Hostname.
 - **Verschlüsselung:** WireGuard verschlüsselt trotzdem den Tailnet-Tunnel, daher reicht **HTTP** im Tailnet (optional Caddy mit self-signed für `https://ai-vm` wenn gewünscht, aber nicht nötig).
 - **Phone:** Tailscale installieren, selbes Tailnet, `Use subnet routes` aktivieren. Ohne Tailnet ist `ai-vm:8080` unerreichbar — genau die gewünschte Private-Only-Garantie.
 - **Vorteil kein Daemon auf ai-vm:** Weniger Pflege auf ai-vm; Nachteil: kein `tailscale serve` HTTPS/Auto-Cert, kein `100.x` — deshalb hier `http` + Subnet.
@@ -349,7 +349,7 @@ CREATE TABLE workout_template_exercises (
 ## 11. Security & Private-Only
 
 - **Perimeter:** `api` container lauscht auf `0.0.0.0:8080` aber ist nur via LAN/Subnet erreichbar — kein Port-Forward, kein öffentlicher DNS. `UFW` `deny 8080/tcp` nur für öffentliches Interface (Tailnet/LAN via Subnet bleibt erlaubt); `docker-compose` exponiert DB nicht. Beste Garantie ist **kein öffentliches Routing** + **Tailscale Subnet** als einziges Gateway.
-- **App:** JWT in `EncryptedSharedPreferences`/`DataStore`, Refresh. `network_security_config.xml` erlaubt `http://ai-vm` im Tailnet (cleartext, da WireGuard bereits verschlüsselt). `BuildConfig` Check: fails if URL not `ai-vm`/`192.168.*`.
+- **App:** JWT in `EncryptedSharedPreferences`/`DataStore`, Refresh. `network_security_config.xml` erlaubt `http://192.168.178.8` (+ `ai-vm`) im Tailnet (cleartext, WireGuard verschlüsselt). `BuildConfig` Check: fails if URL not `192.168.178.8`/`ai-vm`.
 - **Not runnable elsewhere:** Ohne aktives Tailnet + genehmigte Subnet-Route ist `ai-vm:8080` nicht routbar — genau private-only. Kein Funnel/Serve nötig weil kein Daemon auf ai-vm.
 - **Secrets:** `.env` (`JWT_SECRET`, `MARIADB_ROOT_PASSWORD`) gitignored (`.gitignore` + `.env`).
 
@@ -376,7 +376,7 @@ volumes: { db-data: {} }
 # .env enthält: MARIADB_ROOT_PASSWORD, MARIADB_USER/PASSWORD, JWT_SECRET
 ```
 
-**TLS:** Kein `tailscale serve` auf `ai-vm` möglich (kein Daemon) → **HTTP im Tailnet** (WireGuard verschlüsselt) genügt per Entscheidung. Optional Caddy self-signed später.
+ **TLS:** Kein `tailscale serve` auf `ai-vm` möglich (kein Daemon) → **HTTP im Tailnet** (`http://192.168.178.8:8080`, verifiziert) genügt. Optional Caddy self-signed später.
 
 **Deploy:**
 ```bash
@@ -385,8 +385,8 @@ git clone https://github.com/drepguy/ul-fitness.git && cd ul-fitness
 cp .env.example .env && $EDITOR .env
 docker compose up -d --build
 docker compose logs -f api
-curl http://ai-vm:8080/api/v1/health # {"status":"ok"}  # nur im Tailnet/Subnet
-# vom Handy (Tailnet an, Subnet genehmigt): http://ai-vm:8080/api/v1/health
+curl http://192.168.178.8:8080/api/v1/health # {"status":"ok"}  # verifiziert PC+Handy via VPN
+# vom Handy (Tailnet an, Subnet 192.168.178.0/24): http://192.168.178.8:8080/api/v1/health
 ```
 
 **Backup:** `docker exec ul-fitness-db-1 mariadb-dump ul_fitness | gzip > backup.sql.gz` (**wöchentlich** per `cron` auf `ai-vm`, per Entscheidung — z. B. `crontab -e` → `0 3 * * 0 docker exec ...`).
@@ -411,7 +411,7 @@ docker compose up --build
 
 ## 14. Config
 
-- `.env` (gitignored, **KG-only**, **deutsch**): `MARIADB_ROOT_PASSWORD`, `MARIADB_USER`, `MARIADB_PASSWORD`, `JWT_SECRET` (32+ chars), `ALLOW_REGISTER=false`, `API_HOST=ai-vm` (LAN-Name via Subnet).
+- `.env` (gitignored, **KG-only**, **deutsch**): `MARIADB_ROOT_PASSWORD`, `MARIADB_USER`, `MARIADB_PASSWORD`, `JWT_SECRET` (32+ chars), `ALLOW_REGISTER=false`, `API_HOST=192.168.178.8` (IP via Subnet, am Handy verifiziert; `ai-vm` nur lokal).
 - `local.properties`: `sdk.dir=C\:\\AndroidSDK` (existing, gitignored).
 - **Aliase:** `exercise_aliases` Tabelle, Seed z. B. `Hackschmitt→Hackenschmidt`.
 - **Bodyweight:** ignoriert für Stats (`weight_kg=0` → nicht in e1RM/Volumen).
@@ -441,12 +441,12 @@ iOS/Desktop targets (KMP ready but ungenerated), body-metrics, CSV export, routi
 
 ## 18. Phases
 
-- **P0 (0.5d):** Subnet-Route `192.168.x.0/24` in LXC approved, `docker-compose.yml` in `~/ul-fitness` health, `GET http://ai-vm:8080/api/v1/health` über Tailnet.
+- **P0 (0.5d):** Subnet-Route `192.168.178.0/24` in LXC approved (verifiziert `tailscale` + Handy `http://192.168.178.8:8080/api/v1/health` → `ok`), `docker-compose.yml` in `~/ul-fitness` health.
 - **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id + sets.is_warmup + exercise_aliases + workout_templates), seed `Thomas Sport Center` / `All Inclusive Fitness` + Aliase + Maschinen aus Anhang 19, JWT (nur du, `ALLOW_REGISTER=false`), gym/exercise/workout/template CRUD.
 - **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms/aliases/templates), Trainingsscreen **Gym → Vorlage/Letztes → Übungs-Picker + inline anlegen** + `reps×weight` Parser (Komma) + Pausentimer + RPE 1-10 (Deutsch).
-- **P3 (1d):** `SyncWorker`, `BuildConfig http://ai-vm:8080`, Offline-Banner.
+- **P3 (1d):** `SyncWorker`, `BuildConfig http://192.168.178.8:8080`, Offline-Banner.
 - **P4 (1.5d):** Vico Fortschritt + PRs mit Studio-Filter (Warmup/Bodyweight ausgeschlossen).
-- **P5 (0.5d):** LAN-only, `network_security_config.xml` für `http://ai-vm`, Signing, `AGENTS.md` Update (Module `shared`/`server`/`composeApp`, Deploy `ssh ulrich@ai-vm && cd ~/ul-fitness && docker compose up`), wöchentlicher Backup-Cron.
+- **P5 (0.5d):** LAN-only, `network_security_config.xml` für `http://192.168.178.8`, Signing, `AGENTS.md` Update (Module `shared`/`server`/`composeApp`, Deploy `ssh ulrich@ai-vm && cd ~/ul-fitness && docker compose up`), wöchentlicher Backup-Cron.
 
 ---
 
