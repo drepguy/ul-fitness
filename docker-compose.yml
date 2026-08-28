@@ -6,8 +6,6 @@ services:
       MARIADB_DATABASE: ul_fitness
     volumes:
       - db-data:/var/lib/mysql
-    ports:
-      - "127.0.0.1:3306:3306" # LAN only, nicht public; via ai-vm lokal
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
