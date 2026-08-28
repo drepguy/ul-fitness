@@ -28,7 +28,9 @@ fun Route.authRoutes() {
             call.respond(HttpStatusCode.Forbidden, mapOf("error" to "registration disabled"))
             return@post
         }
-        val req = call.receive<RegisterRequest>()
+        val body = call.receiveText()
+        call.application.environment.log.info("register body: $body")
+        val req = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<RegisterRequest>(body) } catch (e: Exception) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid json: ${e.message}")); return@post }
         if (req.email.isBlank() || req.password.length < 6) {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "email/password invalid"))
             return@post
@@ -46,7 +48,9 @@ fun Route.authRoutes() {
     }
 
     post("/api/v1/auth/login") {
-        val req = call.receive<LoginRequest>()
+        val bodyLogin = call.receiveText()
+        call.application.environment.log.info("login body: $bodyLogin")
+        val req = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<LoginRequest>(bodyLogin) } catch (e: Exception) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid json: ${e.message}")); return@post }
         val row = transaction { Users.selectAll().where { Users.email eq req.email }.singleOrNull() }
             ?: run { call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "invalid credentials")); return@post }
         val hash = row[Users.passwordHash]
@@ -61,7 +65,8 @@ fun Route.authRoutes() {
     }
 
     post("/api/v1/auth/refresh") {
-        val body = call.receive<Map<String, String>>()
+        val bodyStr = call.receiveText()
+        val body = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<Map<String, String>>(bodyStr) } catch (e: Exception) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid json")); return@post }
         val token = body["refreshToken"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "missing refreshToken")); return@post }
         try {
             val decoded = JwtConfig.verifier.verify(token)

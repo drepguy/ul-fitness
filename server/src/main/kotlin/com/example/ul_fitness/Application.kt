@@ -11,6 +11,7 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
@@ -32,7 +33,9 @@ fun Application.module() {
     }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "internal")))
+            call.application.environment.log.error("Unhandled exception for ${call.request.uri}", cause)
+            cause.printStackTrace()
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "internal"), "type" to (cause::class.simpleName ?: "unknown")))
         }
     }
     install(Authentication) {
