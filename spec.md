@@ -1,7 +1,7 @@
 # UL Fitness — Spec
 
-**Version:** 0.4 — 2026-08-30  
-**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides)  
+**Version:** 0.4.1 — 2026-08-30  
+**Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides; 1 Gerät → n Übungen)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
 ---
@@ -178,22 +178,36 @@ CREATE TABLE workout_template_exercises (
 -- INSERT INTO gyms(owner_id,name,is_system) VALUES (NULL,'Thomas Sport Center',TRUE),(NULL,'All Inclusive Fitness',TRUE);
 -- All Inclusive — Legs/Core seed (kind=machine unless noted):
 --   Hackenschmidt, Hip Thrust Machine, Hip Thrust (free_weight), Beinstrecker (Leg Extension),
---   Beinbeuger (Leg Curl), Waden an 45er Presse, Waden horizontal / Beinpresse horizontal (Leg Press horizontal),
---   Bauchmaschine, Hyperextension (bodyweight), Beinpresse, V Squat Machine
+--   Beinbeuger (Leg Curl),
+--   // WICHTIG: gleiches Gerät → mehrere Übungen (dein Hinweis 30.08):
+--   // Beinpresse horizontal (Beine/Quads, machine, All Inclusive),
+--   // Wadenpresse horizontal (Waden, machine, All Inclusive),
+--   // Beinpresse 45° (Beine/Quads, machine, All Inclusive),
+--   // Wadenpresse 45° (Waden, machine, All Inclusive) — also 4 Übungen auf 2 Geräten
+--   // + sitzende Wadenheber-Maschine (Waden, All Inclusive),
+--   Bauchmaschine, Hyperextension (bodyweight), V Squat Machine
 -- Thomas Sport Center — Upper seed:
 --   Latzug, Brustpresse, Rudern / Rudern Maschine / Rudern Brustgestützt, Brustfly / Chest Fly,
 --   Schulterpresse, Seitheben, Face Pulls, Bizeps Hammer Curls / Bizeps am Kabelzug,
 --   Trizeps Skull Crush / Trizeps Overhead Kabelzug, Bauch, Waden einseitig,
---   Unterarme innen/außen Curls
+--   Unterarme innen/außen Curls,
+--   // zusätzlich sitzende Wadenheber + separate Wadenmaschine (Thomas, noch nicht geloggt, aber anlegbar)
+--   Wadenheber sitzend (Thomas), Wadenmaschine Thomas
 -- INSERT INTO exercises(owner_id,gym_id,name,category,kind,is_system) VALUES
 --   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hackenschmidt','legs','machine',TRUE),
 --   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Hip Thrust Machine','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Beinpresse horizontal','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenpresse horizontal','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Beinpresse 45°','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenpresse 45°','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='All Inclusive Fitness'),'Wadenheber sitzend','legs','machine',TRUE),
+--   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Wadenheber sitzend','legs','machine',TRUE),
 --   (NULL,NULL,'Hyperextension','core','bodyweight',TRUE), -- weight 0 = body
 --   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Brustpresse','push','machine',TRUE),
 --   (NULL,(SELECT id FROM gyms WHERE name='Thomas Sport Center'),'Latzug','pull','cable',TRUE), ...
 ```
 
-**Gym modeling:** `gyms` first-class, extensible N. Seed the two current gyms as `is_system` so every user sees them; `Thomas Sport Center` default tag = Upper, `All Inclusive Fitness` = Legs+Core but not enforced — user can do any category at either gym. `exercises.gym_id` distinguishes global free-weights (`NULL`, show at any gym) vs gym-specific machines (e.g. “Chest Press #2” `gym_id=All Inclusive` only appears when that gym is selected; global search can still find it). Validation: `workouts.gym_id` must match or be `NULL` for exercises added to that workout if `exercises.gym_id IS NOT NULL`.
+**Gym modeling:** `gyms` first-class, extensible N. Seed die zwei Studios als `is_system`; `Thomas Sport Center` = Upper, `All Inclusive Fitness` = Beine/Core — nicht erzwungen. Ein **Gerät** (z. B. `Beinpresse horizontal`) kann **mehrere Übungen** hosten — dein Fall: `Beinpresse horizontal` + `Wadenpresse horizontal` und `Beinpresse 45°` + `Wadenpresse 45°` sind **4 Übungen auf 2 Geräten** (`spec.md:179`). Gleiches für `Wadenheber sitzend` (All Inclusive + Thomas je eine Maschine). Generell: **Gerät = physisches Gerät, Übung = Bewegung + Gerät + Studio** — v1 vereint als `exercises` (`gym_id` + `name`). Nutzer kann jederzeit `Geräte/Übungen` anlegen (`POST /exercises`, `kind=machine` braucht `gym_id`), daher flexibel. Validierung: `workouts.gym_id` muss zu `exercises.gym_id` (oder `NULL` für globale) passen; `Beinpresse horizontal (Quads)` und `Wadenpresse horizontal (Waden)` sind trotz gleichem Gerät getrennt trackbar (eigene PRs/Charts).
 
 **Alias modeling:** `exercise_aliases` maps typos/variants to canonical exercise (`Hackschmitt→Hackenschmidt`, `Brust→Brustpresse`, `Chest fly→Brustfly`, `Beinpresse horizontal→Beinpresse`). `GET /exercises?q=` searches `exercises.name` **and** `exercise_aliases.alias` (JOIN). Picker shows canonical name with alias hint.
 
@@ -382,6 +396,7 @@ iOS/Desktop targets (KMP ready but ungenerated), body-metrics, CSV export, routi
 - **Gyms first-class (2026-08-29):** `gyms` table, seed `Thomas Sport Center` (Upper) + `All Inclusive Fitness` (Legs/Core) as `is_system`. `exercises.gym_id NULL` = global free-weight, otherwise machine tied to one gym (user wants to choose per-gym machines or create new). `workouts.gym_id` required. Picker filters `global + this-gym machines`, API validates mismatch. Covers your current 2-gym split but extensible N.
 - **Machine/exercise input from real logs (2026-08-29):** See Appendix 19; decimal `47,5` comma, `body` weight (ignoriert), `y` typo handling → parser + `exercise_aliases` Tabelle.
 - **Restliche Fragen 2026-08-30:** Deploy `~/ul-fitness` (einfach, `ssh ulrich@ai-vm`), Auth nur du v1, Vorlagen **beides** (letztes kopieren + gespeicherte `workout_templates` je Studio), TLS **HTTP** im Tailnet + **wöchentliches Backup**.
+- **1 Gerät → n Übungen (2026-08-30):** Beinpresse horizontal/45° je für Quads + Waden = 4 Übungen auf 2 Geräten; plus sitzende Wadenheber + separate Waden Thomas. Modell `exercises(gym_id,name)` bildet das ab; Nutzer legt jederzeit neue `Geräte/Übungen` an.
 
 ## 18. Phases
 
