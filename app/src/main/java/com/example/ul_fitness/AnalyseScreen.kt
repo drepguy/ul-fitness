@@ -244,9 +244,11 @@ fun AnalyseScreen(
                                 "maxWeight" -> dailyData.map { it.maxWeight }
                                 else -> dailyData.map { it.e1RM }
                             }
+                            val chartDates = dailyData.map { it.date.take(5) }
                             SimpleLineChart(
                                 values = values,
-                                modifier = Modifier.fillMaxWidth().height(180.dp)
+                                dates = chartDates,
+                                modifier = Modifier.fillMaxWidth().height(200.dp)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
@@ -356,6 +358,7 @@ fun AnalyseScreen(
 @Composable
 fun SimpleLineChart(
     values: List<Double>,
+    dates: List<String> = emptyList(),
     modifier: Modifier = Modifier,
     lineColor: Color = MaterialTheme.colorScheme.primary
 ) {
@@ -367,7 +370,7 @@ fun SimpleLineChart(
 
     Canvas(modifier = modifier) {
         val paddingLeft = with(density) { 48.dp.toPx() }
-        val paddingBottom = with(density) { 32.dp.toPx() }
+        val paddingBottom = with(density) { 40.dp.toPx() }
         val paddingTop = with(density) { 16.dp.toPx() }
         val chartWidth = size.width - paddingLeft
         val chartHeight = size.height - paddingTop - paddingBottom
@@ -388,6 +391,12 @@ fun SimpleLineChart(
             textAlign = android.graphics.Paint.Align.RIGHT
         }
 
+        val datePaint = android.graphics.Paint().apply {
+            color = textColor.hashCode()
+            textSize = with(density) { 9.sp.toPx() }
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+
         for (i in 0..4) {
             val y = paddingTop + chartHeight * (1f - i / 4f)
             drawContext.canvas.nativeCanvas.drawLine(paddingLeft, y, size.width, y, gridPaint)
@@ -399,6 +408,9 @@ fun SimpleLineChart(
             val x = paddingLeft + chartWidth / 2f
             val y = paddingTop + chartHeight * (1f - ((values[0] - minVal) / range)).toFloat()
             drawCircle(lineColor, 5f, Offset(x, y))
+            if (dates.isNotEmpty()) {
+                drawContext.canvas.nativeCanvas.drawText(dates[0], x, size.height - 4f, datePaint)
+            }
             return@Canvas
         }
 
@@ -417,6 +429,19 @@ fun SimpleLineChart(
             val x = paddingLeft + stepX * i
             val y = paddingTop + chartHeight * (1f - ((v - minVal) / range)).toFloat()
             drawCircle(lineColor, 4f, Offset(x, y))
+        }
+
+        if (dates.isNotEmpty()) {
+            val maxLabels = (chartWidth / with(density) { 60.dp.toPx() }).toInt().coerceAtLeast(2)
+            val step = if (dates.size <= maxLabels) 1 else dates.size / maxLabels
+            for (i in dates.indices step step.coerceAtLeast(1)) {
+                val x = paddingLeft + stepX * i
+                drawContext.canvas.nativeCanvas.drawText(dates[i], x, size.height - 4f, datePaint)
+            }
+            if ((dates.size - 1) % step.coerceAtLeast(1) != 0) {
+                val x = paddingLeft + stepX * (dates.size - 1)
+                drawContext.canvas.nativeCanvas.drawText(dates.last(), x, size.height - 4f, datePaint)
+            }
         }
     }
 }
