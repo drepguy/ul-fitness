@@ -53,11 +53,11 @@ class MainActivity : ComponentActivity() {
 }
 
 data class ActiveSet(
-    var reps: String = "10",
-    var weightKg: String = "0",
-    var rpe: String = "",
-    var isWarmup: Boolean = false,
-    var isFailure: Boolean = false
+    val reps: String = "10",
+    val weightKg: String = "0",
+    val rpe: String = "",
+    val isWarmup: Boolean = false,
+    val isFailure: Boolean = false
 )
 
 data class ActiveExercise(
@@ -65,7 +65,7 @@ data class ActiveExercise(
     val name: String,
     val category: String,
     val iconKey: String,
-    val sets: MutableList<ActiveSet> = mutableListOf()
+    val sets: List<ActiveSet> = emptyList()
 )
 
 @Composable
@@ -298,43 +298,39 @@ fun ActiveWorkoutScreen(
     }
 
     fun removeExercise(index: Int) {
-        val newList = exercises.toMutableList()
-        newList.removeAt(index)
-        onExercisesChange(newList)
+        onExercisesChange(exercises.toMutableList().apply { removeAt(index) })
     }
 
     fun addSet(exerciseIndex: Int) {
-        val list = exercises.toMutableList()
-        val ex = list[exerciseIndex]
+        val ex = exercises[exerciseIndex]
         val lastSet = ex.sets.lastOrNull()
-        ex.sets.add(
-            ActiveSet(
-                reps = lastSet?.reps ?: "10",
-                weightKg = lastSet?.weightKg ?: "0",
-                rpe = lastSet?.rpe ?: ""
-            )
+        val newSet = ActiveSet(
+            reps = lastSet?.reps ?: "10",
+            weightKg = lastSet?.weightKg ?: "0",
+            rpe = lastSet?.rpe ?: ""
         )
-        onExercisesChange(list)
+        val updated = ex.copy(sets = ex.sets + newSet)
+        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, updated) })
     }
 
     fun removeSet(exerciseIndex: Int, setIndex: Int) {
+        val ex = exercises[exerciseIndex]
+        val newSets = ex.sets.toMutableList().apply { removeAt(setIndex) }
         val list = exercises.toMutableList()
-        val ex = list[exerciseIndex]
-        ex.sets.removeAt(setIndex)
-        if (ex.sets.isEmpty()) {
+        if (newSets.isEmpty()) {
             list.removeAt(exerciseIndex)
+        } else {
+            list[exerciseIndex] = ex.copy(sets = newSets)
         }
         onExercisesChange(list)
     }
 
-    fun updateSet(exerciseIndex: Int, setIndex: Int, transform: ActiveSet.() -> Unit) {
-        val list = exercises.toMutableList()
-        val ex = list[exerciseIndex]
-        val mutableSets = ex.sets.toMutableList()
-        mutableSets[setIndex] = mutableSets[setIndex].apply(transform)
-        val updatedEx = ex.copy(sets = mutableSets)
-        list[exerciseIndex] = updatedEx
-        onExercisesChange(list)
+    fun updateSet(exerciseIndex: Int, setIndex: Int, transform: ActiveSet.() -> ActiveSet) {
+        val ex = exercises[exerciseIndex]
+        val newSets = ex.sets.toMutableList()
+        newSets[setIndex] = newSets[setIndex].transform()
+        val updated = ex.copy(sets = newSets)
+        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, updated) })
     }
 
     // Rest Timer Overlay
@@ -357,7 +353,7 @@ fun ActiveWorkoutScreen(
                     name = ex.name,
                     category = ex.category,
                     iconKey = ex.iconKey,
-                    sets = mutableListOf(ActiveSet(reps = "10", weightKg = "0"))
+                    sets = listOf(ActiveSet(reps = "10", weightKg = "0"))
                 )
                 onExercisesChange(exercises + newExercise)
                 showExercisePicker = false
@@ -524,7 +520,7 @@ fun ExerciseCard(
     exercise: ActiveExercise,
     onAddSet: () -> Unit,
     onRemoveSet: (Int) -> Unit,
-    onUpdateSet: (Int, ActiveSet.() -> Unit) -> Unit,
+    onUpdateSet: (Int, ActiveSet.() -> ActiveSet) -> Unit,
     onRemove: () -> Unit,
     onStartRest: () -> Unit
 ) {
@@ -577,7 +573,7 @@ fun ExerciseCard(
 
                     OutlinedTextField(
                         value = set.reps,
-                        onValueChange = { onUpdateSet(setIdx) { reps = it } },
+                        onValueChange = { onUpdateSet(setIdx) { copy(reps = it) } },
                         modifier = Modifier.weight(1f).height(48.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -586,7 +582,7 @@ fun ExerciseCard(
 
                     OutlinedTextField(
                         value = set.weightKg,
-                        onValueChange = { onUpdateSet(setIdx) { weightKg = it } },
+                        onValueChange = { onUpdateSet(setIdx) { copy(weightKg = it) } },
                         modifier = Modifier.weight(1f).height(48.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -595,7 +591,7 @@ fun ExerciseCard(
 
                     OutlinedTextField(
                         value = set.rpe,
-                        onValueChange = { onUpdateSet(setIdx) { rpe = it } },
+                        onValueChange = { onUpdateSet(setIdx) { copy(rpe = it) } },
                         modifier = Modifier.weight(0.7f).height(48.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -620,7 +616,7 @@ fun ExerciseCard(
                     FilterChip(
                         selected = exercise.sets.last().isWarmup,
                         onClick = {
-                            onUpdateSet(exercise.sets.lastIndex) { isWarmup = !isWarmup }
+                            onUpdateSet(exercise.sets.lastIndex) { copy(isWarmup = !isWarmup) }
                         },
                         label = { Text("Warmup", fontSize = 11.sp) },
                         modifier = Modifier.height(28.dp)
@@ -628,7 +624,7 @@ fun ExerciseCard(
                     FilterChip(
                         selected = exercise.sets.last().isFailure,
                         onClick = {
-                            onUpdateSet(exercise.sets.lastIndex) { isFailure = !isFailure }
+                            onUpdateSet(exercise.sets.lastIndex) { copy(isFailure = !isFailure) }
                         },
                         label = { Text("Muskelversagen", fontSize = 11.sp) },
                         modifier = Modifier.height(28.dp)
