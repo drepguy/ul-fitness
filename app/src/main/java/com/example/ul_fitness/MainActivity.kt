@@ -140,7 +140,10 @@ fun TrainingApp() {
     var checkingAuth by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
+        val start = System.currentTimeMillis()
         if (!api.isLoggedIn()) api.login("ulrich@ulf.local", "UlFitness2026!")
+        val elapsed = System.currentTimeMillis() - start
+        if (elapsed < 2000) delay(2000 - elapsed)
         loggedIn = true
         checkingAuth = false
     }
