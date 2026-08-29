@@ -20,7 +20,7 @@ sqlDelight = "2.0.2"
 jwt = "4.4.0"
 jbcrypt = "0.4"
 composeBom = "2024.09.03"
-vico = "2.0.0-beta.2"
+vico = "2.0.0"
 activityCompose = "1.9.3"
 lifecycleViewmodelCompose = "2.9.1"
 
