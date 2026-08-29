@@ -6,7 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,7 +36,10 @@ import androidx.compose.ui.unit.sp
 import androidx.appcompat.app.AppCompatDelegate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,12 +54,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+fun formatLocalDateTime(isoString: String): String {
+    return try {
+        val parsed = LocalDateTime.parse(isoString.take(19))
+        val local = parsed.atZone(ZoneId.systemDefault())
+        local.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm", Locale.GERMAN))
+    } catch (_: Exception) {
+        isoString.take(16)
+    }
+}
+
 data class ActiveSet(
     val reps: String = "10",
     val weightKg: String = "0",
-    val rpe: String = "",
-    val isWarmup: Boolean = false,
-    val isFailure: Boolean = false
+    val rpe: String = ""
 )
 
 data class ActiveExercise(
@@ -101,17 +111,16 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
     var screen by remember { mutableStateOf("home") }
     var selectedGym by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var activeExercises by remember { mutableStateOf(listOf<ActiveExercise>()) }
-    var showSummary by remember { mutableStateOf(false) }
-    var lastWorkoutSummary by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var viewingWorkoutId by remember { mutableLongStateOf(0L) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        when {
-                            screen == "workout" && activeExercises.isNotEmpty() ->
-                                "${activeExercises.size} Übung${if (activeExercises.size > 1) "en" else ""}"
+                        when (screen) {
+                            "workout" -> if (activeExercises.isNotEmpty()) "${activeExercises.size} Übung${if (activeExercises.size > 1) "en" else ""}" else "Neues Training"
+                            "detail" -> "Training ansehen"
                             else -> "UL Fitness"
                         }
                     )
@@ -122,12 +131,15 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
                 navigationIcon = {
                     if (screen != "home") {
                         IconButton(onClick = {
-                            if (screen == "workout" && activeExercises.isNotEmpty()) {
-                                // Don't lose data accidentally - handled by dialog in workout
-                            } else {
-                                screen = "home"
-                                selectedGym = null
-                                activeExercises = emptyList()
+                            when (screen) {
+                                "workout" -> {
+                                    if (activeExercises.isEmpty()) {
+                                        screen = "home"; selectedGym = null
+                                    }
+                                }
+                                else -> {
+                                    screen = "home"; selectedGym = null; activeExercises = emptyList()
+                                }
                             }
                         }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
@@ -157,6 +169,10 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
                     selectedGym = gymId to gymName
                     activeExercises = emptyList()
                     screen = "workout"
+                },
+                onOpenWorkout = { workoutId ->
+                    viewingWorkoutId = workoutId
+                    screen = "detail"
                 }
             )
             "workout" -> ActiveWorkoutScreen(
@@ -166,12 +182,17 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
                 gymName = selectedGym?.second ?: "",
                 exercises = activeExercises,
                 onExercisesChange = { activeExercises = it },
-                onFinish = { gymName, count ->
+                onFinish = { _, _ ->
                     screen = "home"
                     selectedGym = null
                     activeExercises = emptyList()
-                    lastWorkoutSummary = gymName to count
                 }
+            )
+            "detail" -> WorkoutDetailScreen(
+                modifier = Modifier.padding(padding),
+                api = api,
+                workoutId = viewingWorkoutId,
+                onBack = { screen = "home" }
             )
         }
     }
@@ -182,7 +203,8 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
 fun HomeScreen(
     modifier: Modifier = Modifier,
     api: ApiClient,
-    onStartWorkout: (Long, String) -> Unit
+    onStartWorkout: (Long, String) -> Unit,
+    onOpenWorkout: (Long) -> Unit
 ) {
     var gyms by remember { mutableStateOf<List<GymDto>>(emptyList()) }
     var recentWorkouts by remember { mutableStateOf<List<WorkoutSummaryDto>>(emptyList()) }
@@ -243,7 +265,9 @@ fun HomeScreen(
             }
             items(recentWorkouts) { workout ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenWorkout(workout.id) },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
@@ -258,7 +282,7 @@ fun HomeScreen(
                                 Icon(Icons.Default.Check, contentDescription = "Beendet", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                             }
                         }
-                        Text(workout.startedAt.take(16), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatLocalDateTime(workout.startedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (!workout.notes.isNullOrBlank()) {
                             Text(workout.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -290,7 +314,6 @@ fun ActiveWorkoutScreen(
     var showRestTimer by remember { mutableStateOf(false) }
     var restSeconds by remember { mutableIntStateOf(90) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
-    var showSuccess by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
 
     LaunchedEffect(gymId) {
@@ -305,24 +328,16 @@ fun ActiveWorkoutScreen(
     fun addSet(exerciseIndex: Int) {
         val ex = exercises[exerciseIndex]
         val lastSet = ex.sets.lastOrNull()
-        val newSet = ActiveSet(
-            reps = lastSet?.reps ?: "10",
-            weightKg = lastSet?.weightKg ?: "0",
-            rpe = lastSet?.rpe ?: ""
-        )
-        val updated = ex.copy(sets = ex.sets + newSet)
-        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, updated) })
+        val newSet = ActiveSet(reps = lastSet?.reps ?: "10", weightKg = lastSet?.weightKg ?: "0", rpe = lastSet?.rpe ?: "")
+        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, ex.copy(sets = ex.sets + newSet)) })
     }
 
     fun removeSet(exerciseIndex: Int, setIndex: Int) {
         val ex = exercises[exerciseIndex]
         val newSets = ex.sets.toMutableList().apply { removeAt(setIndex) }
         val list = exercises.toMutableList()
-        if (newSets.isEmpty()) {
-            list.removeAt(exerciseIndex)
-        } else {
-            list[exerciseIndex] = ex.copy(sets = newSets)
-        }
+        if (newSets.isEmpty()) list.removeAt(exerciseIndex)
+        else list[exerciseIndex] = ex.copy(sets = newSets)
         onExercisesChange(list)
     }
 
@@ -330,39 +345,24 @@ fun ActiveWorkoutScreen(
         val ex = exercises[exerciseIndex]
         val newSets = ex.sets.toMutableList()
         newSets[setIndex] = newSets[setIndex].transform()
-        val updated = ex.copy(sets = newSets)
-        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, updated) })
+        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, ex.copy(sets = newSets)) })
     }
 
-    // Rest Timer Overlay
     if (showRestTimer) {
-        RestTimerOverlay(
-            initialSeconds = restSeconds,
-            onDismiss = { showRestTimer = false },
-            onDone = { showRestTimer = false }
-        )
+        RestTimerOverlay(initialSeconds = restSeconds, onDismiss = { showRestTimer = false }, onDone = { showRestTimer = false })
     }
 
-    // Exercise Picker Dialog
     if (showExercisePicker) {
         ExercisePickerDialog(
             exercises = availableExercises,
             onDismiss = { showExercisePicker = false },
             onSelect = { ex ->
-                val newExercise = ActiveExercise(
-                    id = ex.id ?: 0,
-                    name = ex.name,
-                    category = ex.category,
-                    iconKey = ex.iconKey,
-                    sets = listOf(ActiveSet(reps = "10", weightKg = "0"))
-                )
-                onExercisesChange(exercises + newExercise)
+                onExercisesChange(exercises + ActiveExercise(id = ex.id ?: 0, name = ex.name, category = ex.category, iconKey = ex.iconKey, sets = listOf(ActiveSet())))
                 showExercisePicker = false
             }
         )
     }
 
-    // Finish Confirmation
     if (showFinishDialog) {
         FinishDialog(
             exerciseCount = exercises.size,
@@ -374,10 +374,6 @@ fun ActiveWorkoutScreen(
                 isSaving = true
                 errorMsg = null
                 scope.launch {
-                    android.util.Log.d("Workout", "Saving workout: gym=$gymId exercises=${exercises.size}")
-                    exercises.forEach { ex ->
-                        android.util.Log.d("Workout", "  ${ex.name}: ${ex.sets.size} sets")
-                    }
                     val req = CreateWorkoutRequest(
                         gymId = gymId,
                         notes = notes.ifBlank { null },
@@ -385,27 +381,17 @@ fun ActiveWorkoutScreen(
                             WorkoutExerciseInput(
                                 exerciseId = ex.id,
                                 sets = ex.sets.map { s ->
-                                    SetInput(
-                                        reps = s.reps.toIntOrNull() ?: 0,
-                                        weightKg = s.weightKg.toDoubleOrNull() ?: 0.0,
-                                        isWarmup = s.isWarmup,
-                                        rpe = s.rpe.toIntOrNull(),
-                                        isFailure = s.isFailure
-                                    )
+                                    SetInput(reps = s.reps.toIntOrNull() ?: 0, weightKg = s.weightKg.toDoubleOrNull() ?: 0.0, rpe = s.rpe.toIntOrNull())
                                 }
                             )
                         }
                     )
                     val id = api.createWorkout(req)
-                    android.util.Log.d("Workout", "createWorkout result: id=$id")
                     if (id != null) {
-                        val finished = api.finishWorkout(id)
-                        android.util.Log.d("Workout", "finishWorkout result: $finished")
-                        showSuccess = true
-                        kotlinx.coroutines.delay(1000)
+                        api.finishWorkout(id)
                         onFinish(gymName, exercises.size)
                     } else {
-                        errorMsg = "Speichern fehlgeschlagen — bitte erneut versuchen"
+                        errorMsg = "Speichern fehlgeschlagen"
                         isSaving = false
                     }
                 }
@@ -414,39 +400,22 @@ fun ActiveWorkoutScreen(
         )
     }
 
-    if (errorMsg != null) {
-        Snackbar(
-            modifier = Modifier.padding(16.dp),
-            action = {
-                TextButton(onClick = { errorMsg = null }) { Text("OK") }
-            }
-        ) { Text(errorMsg!!) }
-    }
-
     if (isLoading) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Exercise list
         LazyColumn(
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
-            item {
-                Text(gymName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            item { Text(gymName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
             if (exercises.isEmpty()) {
                 item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                         Text("Übung hinzufügen um zu starten", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -458,69 +427,43 @@ fun ActiveWorkoutScreen(
                     onAddSet = { addSet(exIdx) },
                     onRemoveSet = { setIdx -> removeSet(exIdx, setIdx) },
                     onUpdateSet = { setIdx, transform -> updateSet(exIdx, setIdx, transform) },
-                    onRemove = { removeExercise(exIdx) },
-                    onStartRest = { showRestTimer = true }
+                    onRemove = { removeExercise(exIdx) }
                 )
             }
 
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
 
-        // Bottom bar
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shadowElevation = 8.dp,
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Row(
-                modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { showExercisePicker = true },
-                    modifier = Modifier.weight(1f).height(48.dp)
-                ) {
+        Surface(modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
+            Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { showExercisePicker = true }, modifier = Modifier.weight(1f).height(48.dp)) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Übung")
                 }
                 Button(
-                    onClick = {
-                        if (exercises.isEmpty()) {
-                            showCancelDialog = true
-                        } else {
-                            showFinishDialog = true
-                        }
-                    },
+                    onClick = { if (exercises.isEmpty()) showCancelDialog = true else showFinishDialog = true },
                     modifier = Modifier.weight(1f).height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (exercises.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (exercises.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error),
                     enabled = !isSaving
                 ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text(if (exercises.isEmpty()) "Abbrechen" else "Fertig")
-                    }
+                    if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Text(if (exercises.isEmpty()) "Abbrechen" else "Fertig")
                 }
             }
         }
+    }
+
+    if (errorMsg != null) {
+        Snackbar(modifier = Modifier.padding(16.dp), action = { TextButton(onClick = { errorMsg = null }) { Text("OK") } }) { Text(errorMsg!!) }
     }
 
     if (showCancelDialog) {
         AlertDialog(
             onDismissRequest = { showCancelDialog = false },
             title = { Text("Training abbrechen?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showCancelDialog = false
-                    onFinish(gymName, 0)
-                }) { Text("Ja, abbrechen", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCancelDialog = false }) { Text("Weiter") }
-            }
+            confirmButton = { TextButton(onClick = { showCancelDialog = false; onFinish(gymName, 0) }) { Text("Ja, abbrechen", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { showCancelDialog = false }) { Text("Weiter") } }
         )
     }
 }
@@ -531,15 +474,10 @@ fun ExerciseCard(
     onAddSet: () -> Unit,
     onRemoveSet: (Int) -> Unit,
     onUpdateSet: (Int, ActiveSet.() -> ActiveSet) -> Unit,
-    onRemove: () -> Unit,
-    onStartRest: () -> Unit
+    onRemove: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Exercise header
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(exercise.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -552,11 +490,7 @@ fun ExerciseCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Set headers
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Sat.", modifier = Modifier.width(32.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Wdh.", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                 Text("kg", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
@@ -564,7 +498,6 @@ fun ExerciseCard(
                 Spacer(modifier = Modifier.width(32.dp))
             }
 
-            // Sets
             exercise.sets.forEachIndexed { setIdx, set ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
@@ -573,14 +506,11 @@ fun ExerciseCard(
                 ) {
                     Text(
                         "${setIdx + 1}",
-                        modifier = Modifier.width(32.dp).clip(RoundedCornerShape(4.dp)).background(
-                            if (set.isWarmup) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent
-                        ).padding(vertical = 8.dp),
+                        modifier = Modifier.width(32.dp).padding(vertical = 8.dp),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold
                     )
-
                     OutlinedTextField(
                         value = set.reps,
                         onValueChange = { onUpdateSet(setIdx) { copy(reps = it) } },
@@ -589,7 +519,6 @@ fun ExerciseCard(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp)
                     )
-
                     OutlinedTextField(
                         value = set.weightKg,
                         onValueChange = { onUpdateSet(setIdx) { copy(weightKg = it) } },
@@ -598,7 +527,6 @@ fun ExerciseCard(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp)
                     )
-
                     OutlinedTextField(
                         value = set.rpe,
                         onValueChange = { onUpdateSet(setIdx) { copy(rpe = it) } },
@@ -608,41 +536,14 @@ fun ExerciseCard(
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp),
                         placeholder = { Text("-", textAlign = TextAlign.Center, fontSize = 14.sp) }
                     )
-
                     IconButton(onClick = { onRemoveSet(setIdx) }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Satz entfernen", modifier = Modifier.size(14.dp))
                     }
                 }
             }
 
-            // Warmup / Failure toggles + Add set
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Warmup toggle for last set
-                if (exercise.sets.isNotEmpty()) {
-                    FilterChip(
-                        selected = exercise.sets.last().isWarmup,
-                        onClick = {
-                            onUpdateSet(exercise.sets.lastIndex) { copy(isWarmup = !isWarmup) }
-                        },
-                        label = { Text("Warmup", fontSize = 11.sp) },
-                        modifier = Modifier.height(28.dp)
-                    )
-                    FilterChip(
-                        selected = exercise.sets.last().isFailure,
-                        onClick = {
-                            onUpdateSet(exercise.sets.lastIndex) { copy(isFailure = !isFailure) }
-                        },
-                        label = { Text("Muskelversagen", fontSize = 11.sp) },
-                        modifier = Modifier.height(28.dp)
-                    )
-                }
-
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(modifier = Modifier.weight(1f))
-
                 TextButton(onClick = onAddSet, modifier = Modifier.height(28.dp)) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                     Text("Satz", fontSize = 11.sp)
@@ -652,30 +553,164 @@ fun ExerciseCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExercisePickerDialog(
-    exercises: List<ExerciseDto>,
-    onDismiss: () -> Unit,
-    onSelect: (ExerciseDto) -> Unit
+fun WorkoutDetailScreen(
+    modifier: Modifier = Modifier,
+    api: ApiClient,
+    workoutId: Long,
+    onBack: () -> Unit
 ) {
-    var search by remember { mutableStateOf("") }
-    val filtered = exercises.filter {
-        search.isBlank() || it.name.contains(search, ignoreCase = true) ||
-                it.aliases.any { a -> a.contains(search, ignoreCase = true) }
+    val scope = rememberCoroutineScope()
+    var detail by remember { mutableStateOf<WorkoutDetailDto?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editNotes by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(workoutId) {
+        detail = api.getWorkoutDetail(workoutId)
+        if (detail != null) editNotes = detail!!.notes ?: ""
+        isLoading = false
     }
+
+    if (isLoading) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+
+    val d = detail
+    if (d == null) {
+        Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Training nicht gefunden", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = onBack) { Text("Zurück") }
+            }
+        }
+        return
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 8.dp)
+        ) {
+            item {
+                Text(d.gymName ?: "Training", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatLocalDateTime(d.startedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (d.endedAt != null) {
+                    Text("bis ${formatLocalDateTime(d.endedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            item {
+                if (isEditing) {
+                    OutlinedTextField(
+                        value = editNotes,
+                        onValueChange = { editNotes = it },
+                        label = { Text("Notizen") },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3
+                    )
+                } else if (!d.notes.isNullOrBlank()) {
+                    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Text(d.notes, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+
+            items(d.exercises) { ex ->
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(ex.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("#", modifier = Modifier.width(24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Wdh.", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                            Text("kg", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                            Text("RPE", modifier = Modifier.weight(0.7f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        }
+                        ex.sets.forEachIndexed { idx, s ->
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+                                Text("${idx + 1}", modifier = Modifier.width(24.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                                Text("${s.reps}", modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                                Text("${s.weightKg}", modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                                Text("${s.rpe ?: "-"}", modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Surface(modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
+            Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { showDeleteDialog = true }, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Löschen", color = MaterialTheme.colorScheme.error)
+                }
+                Button(
+                    onClick = {
+                        if (isEditing) {
+                            isSaving = true
+                            scope.launch {
+                                api.updateWorkoutNotes(workoutId, editNotes)
+                                isSaving = false
+                                isEditing = false
+                                detail = api.getWorkoutDetail(workoutId)
+                            }
+                        } else {
+                            isEditing = true
+                        }
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    enabled = !isSaving
+                ) {
+                    if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Text(if (isEditing) "Speichern" else "Bearbeiten")
+                }
+            }
+        }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Training löschen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    scope.launch {
+                        api.deleteWorkout(workoutId)
+                        onBack()
+                    }
+                }) { Text("Löschen", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Abbrechen") } }
+        )
+    }
+
+    if (errorMsg != null) {
+        Snackbar(modifier = Modifier.padding(16.dp), action = { TextButton(onClick = { errorMsg = null }) { Text("OK") } }) { Text(errorMsg!!) }
+    }
+}
+
+@Composable
+fun ExercisePickerDialog(exercises: List<ExerciseDto>, onDismiss: () -> Unit, onSelect: (ExerciseDto) -> Unit) {
+    var search by remember { mutableStateOf("") }
+    val filtered = exercises.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) || it.aliases.any { a -> a.contains(search, ignoreCase = true) } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Übung wählen") },
         text = {
             Column {
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = { search = it },
-                    label = { Text("Suchen...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                OutlinedTextField(value = search, onValueChange = { search = it }, label = { Text("Suchen...") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
                     items(filtered) { ex ->
@@ -683,10 +718,7 @@ fun ExercisePickerDialog(
                             headlineContent = { Text(ex.name) },
                             supportingContent = { Text(ex.category) },
                             leadingContent = {
-                                Box(
-                                    modifier = Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
                                     Text(ex.iconKey.take(2).uppercase(), style = MaterialTheme.typography.labelMedium)
                                 }
                             },
@@ -697,21 +729,12 @@ fun ExercisePickerDialog(
             }
         },
         confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Abbrechen") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } }
     )
 }
 
 @Composable
-fun FinishDialog(
-    exerciseCount: Int,
-    totalSets: Int,
-    notes: String,
-    onNotesChange: (String) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
+fun FinishDialog(exerciseCount: Int, totalSets: Int, notes: String, onNotesChange: (String) -> Unit, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Training beenden?") },
@@ -719,66 +742,33 @@ fun FinishDialog(
             Column {
                 Text("$exerciseCount Übungen, $totalSets Sätze")
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = onNotesChange,
-                    label = { Text("Notizen (optional)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 3
-                )
+                OutlinedTextField(value = notes, onValueChange = onNotesChange, label = { Text("Notizen (optional)") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
             }
         },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Speichern & Beenden") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Weiter trainieren") }
-        }
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Speichern & Beenden") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Weiter trainieren") } }
     )
 }
 
 @Composable
-fun RestTimerOverlay(
-    initialSeconds: Int,
-    onDismiss: () -> Unit,
-    onDone: () -> Unit
-) {
+fun RestTimerOverlay(initialSeconds: Int, onDismiss: () -> Unit, onDone: () -> Unit) {
     var remaining by remember { mutableIntStateOf(initialSeconds) }
-
-    LaunchedEffect(initialSeconds) {
-        while (remaining > 0) {
-            delay(1000L)
-            remaining--
-        }
-        onDone()
-    }
+    LaunchedEffect(initialSeconds) { while (remaining > 0) { delay(1000L); remaining-- }; onDone() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Pause", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                val minutes = remaining / 60
-                val seconds = remaining % 60
-                Text(
-                    "%d:%02d".format(minutes, seconds),
-                    style = MaterialTheme.typography.displayLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Text("%d:%02d".format(remaining / 60, remaining % 60), style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(30, 60, 90, 120).forEach { secs ->
-                        AssistChip(
-                            onClick = { remaining = secs },
-                            label = { Text("${secs}s") }
-                        )
+                        AssistChip(onClick = { remaining = secs }, label = { Text("${secs}s") })
                     }
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDone) { Text("Weiter") }
-        }
+        confirmButton = { TextButton(onClick = onDone) { Text("Weiter") } }
     )
 }
