@@ -6,6 +6,8 @@ services:
       MARIADB_DATABASE: ul_fitness
     volumes:
       - db-data:/var/lib/mysql
+    ports:
+      - "3307:3306" # via LXC Subnet (Tailnet), kein public Forward
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
