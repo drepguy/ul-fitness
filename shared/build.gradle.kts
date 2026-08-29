@@ -5,7 +5,6 @@ plugins {
 
 kotlin {
     jvm()
-    // androidTarget() will be added after P0 when Compose scaffold stabilizes
     sourceSets {
         val commonMain by getting {
             dependencies {
