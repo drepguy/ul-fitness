@@ -38,6 +38,11 @@ fun Route.workoutRoutes() {
                     ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "exercise ${ex.exerciseId} not found")); return@post }
                 val eg = row[Exercises.gymId]
                 if (eg != null && eg != req.gymId) { call.respond(HttpStatusCode.Conflict, mapOf("error" to "machine belongs to other gym")); return@post }
+                for (s in ex.sets) {
+                    if (s.reps < 0) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "reps >=0")); return@post }
+                    if (s.weightKg < 0) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "weight >=0")); return@post }
+                    s.rpe?.let { if (it !in 1..10) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "rpe 1-10")); return@post } }
+                }
             }
             val started = req.startedAt?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME) } ?: LocalDateTime.now()
             val wid = transaction {
@@ -109,9 +114,29 @@ fun Route.workoutRoutes() {
         patch("/api/v1/workouts/{id}/finish") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@patch }
-            val body = call.receive<Map<String,String>>()
-            val ended = body["endedAt"]?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME) } ?: LocalDateTime.now()
+            val body = call.receiveText().let { try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<Map<String,String>>(it) } catch (e: Exception) { emptyMap<String,String>() } }
+            val ended = body["ended_at"]?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME) } ?: body["endedAt"]?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME) } ?: LocalDateTime.now()
             val updated = transaction { Workouts.update({ (Workouts.id eq id) and (Workouts.userId eq uid) }) { it[endedAt] = ended } }
+            if (updated==0) call.respond(HttpStatusCode.NotFound) else call.respond(mapOf("ok" to true))
+        }
+
+        patch("/api/v1/workouts/{id}") {
+            val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
+            val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@patch }
+            val body = call.receiveText().let { try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<Map<String,String>>(it) } catch (e: Exception) { emptyMap<String,String>() } }
+            val gymId = body["gym_id"]?.toLongOrNull() ?: body["gymId"]?.toLongOrNull()
+            val notes = body["notes"]
+            if (gymId == null && notes == null) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "gym_id or notes required")); return@patch }
+            if (gymId != null) {
+                val exists = transaction { Gyms.selectAll().where { Gyms.id eq gymId }.count() > 0 }
+                if (!exists) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "gym not found")); return@patch }
+            }
+            val updated = transaction {
+                Workouts.update({ (Workouts.id eq id) and (Workouts.userId eq uid) }) {
+                    if (gymId != null) it[Workouts.gymId] = gymId
+                    if (notes != null) it[Workouts.notes] = notes
+                }
+            }
             if (updated==0) call.respond(HttpStatusCode.NotFound) else call.respond(mapOf("ok" to true))
         }
 
