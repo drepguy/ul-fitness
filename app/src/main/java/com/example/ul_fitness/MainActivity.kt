@@ -62,7 +62,29 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            MaterialTheme(colorScheme = darkColorScheme(
+                primary = Color(0xFFBB86FC),
+                onPrimary = Color.Black,
+                primaryContainer = Color(0xFF1A1025),
+                onPrimaryContainer = Color(0xFFE8DAFF),
+                secondary = Color(0xFF03DAC5),
+                onSecondary = Color.Black,
+                secondaryContainer = Color(0xFF0D2D2B),
+                onSecondaryContainer = Color(0xFFA0F0E8),
+                background = Color(0xFF0C0C0F),
+                onBackground = Color(0xFFE6E1E5),
+                surface = Color(0xFF141418),
+                onSurface = Color(0xFFE6E1E5),
+                surfaceVariant = Color(0xFF1C1C22),
+                onSurfaceVariant = Color(0xFFCAC4CF),
+                surfaceContainerLow = Color(0xFF161619),
+                surfaceContainer = Color(0xFF1E1E23),
+                surfaceContainerHigh = Color(0xFF28282F),
+                outline = Color(0xFF3A3A42),
+                outlineVariant = Color(0xFF2A2A32),
+                error = Color(0xFFFFB4AB),
+                onError = Color(0xFF690005)
+            )) {
                 TrainingApp()
             }
         }
@@ -125,7 +147,7 @@ fun SplashScreen() {
                 contentScale = ContentScale.Fit
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Text("UL Fitness", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("UL Fitness", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
             Spacer(modifier = Modifier.height(8.dp))
             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -180,9 +202,9 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
                             "exercises" -> "Übungen"
                             "analysis" -> "Analyse"
                             else -> "UL Fitness"
-                        })
+                        }, fontWeight = FontWeight.Bold)
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
                         if (currentRoute == "home") {
                             TextButton(onClick = {
@@ -197,12 +219,19 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
         },
         bottomBar = {
             if (isTopLevel) {
-                NavigationBar {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 0.dp) {
                     bottomItems.forEach { item ->
                         NavigationBarItem(
                             icon = { Icon(item.icon, contentDescription = item.label) },
-                            label = { Text(item.label) },
+                            label = { Text(item.label, fontWeight = if (currentRoute == item.route) FontWeight.Bold else FontWeight.Normal) },
                             selected = currentRoute == item.route,
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
                             onClick = {
                                 if (currentRoute != item.route) {
                                     navController.navigate(item.route) {
@@ -322,13 +351,27 @@ fun HomeScreen(
     }
 
     LazyColumn(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Willkommen!", style = MaterialTheme.typography.headlineMedium); Spacer(modifier = Modifier.height(8.dp)) }
         item {
-            Text("Training starten", style = MaterialTheme.typography.titleMedium)
+            Text("Willkommen!", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            Text("Bleib stark. Trainier konsequent.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        item {
+            Text("Training starten", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(8.dp))
             gyms.forEach { gym ->
-                OutlinedCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onStartWorkout(gym.id ?: 1, gym.name) }) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onStartWorkout(gym.id ?: 1, gym.name) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
                     Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                            Surface(modifier = Modifier.size(44.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(gym.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             gym.city?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -339,14 +382,28 @@ fun HomeScreen(
             }
         }
         if (recentWorkouts.isNotEmpty()) {
-            item { Spacer(modifier = Modifier.height(8.dp)); Text("Letzte Trainings", style = MaterialTheme.typography.titleMedium) }
+            item { Spacer(modifier = Modifier.height(4.dp)); Text("Letzte Trainings", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary) }
             items(recentWorkouts) { workout ->
-                Card(modifier = Modifier.fillMaxWidth().clickable { onOpenWorkout(workout.id) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { onOpenWorkout(workout.id) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(workout.gymName ?: "Unbekannt", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            if (workout.endedAt != null) { Spacer(modifier = Modifier.weight(1f)); Icon(Icons.Default.Check, contentDescription = "Beendet", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp)) }
+                            Spacer(modifier = Modifier.weight(1f))
+                            if (workout.endedAt != null) {
+                                Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)) {
+                                    Text("Fertig", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            } else {
+                                Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)) {
+                                    Text("Aktiv", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                                }
+                            }
                         }
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(formatLocalDateTime(workout.startedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (!workout.notes.isNullOrBlank()) { Text(workout.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
@@ -442,17 +499,30 @@ fun ActiveWorkoutScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-            item { Text(gymName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (exercises.isEmpty()) { item { Box(modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) { Text("Übung hinzufügen um zu starten", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+            item {
+                Text(gymName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+            if (exercises.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.outline)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Übung hinzufügen um zu starten", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
             itemsIndexed(exercises) { exIdx, exercise ->
                 ExerciseCard(exercise = exercise, onAddSet = { addSet(exIdx) }, onRemoveSet = { setIdx -> removeSet(exIdx, setIdx) }, onUpdateSet = { setIdx, transform -> updateSet(exIdx, setIdx, transform) }, onRemove = { removeExercise(exIdx) })
             }
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
-        Surface(modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
-            Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { showExercisePicker = true }, modifier = Modifier.weight(1f).height(48.dp)) { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Übung") }
-                Button(onClick = { if (exercises.isEmpty()) showCancelDialog = true else showFinishDialog = true }, modifier = Modifier.weight(1f).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = if (exercises.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error), enabled = !isSaving) {
+        Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 8.dp) {
+            Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = { showExercisePicker = true }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Übung") }
+                Button(onClick = { if (exercises.isEmpty()) showCancelDialog = true else showFinishDialog = true }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = if (exercises.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error), enabled = !isSaving) {
                     if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) else Text(if (exercises.isEmpty()) "Abbrechen" else "Fertig")
                 }
             }
@@ -465,30 +535,40 @@ fun ActiveWorkoutScreen(
 
 @Composable
 fun ExerciseCard(exercise: ActiveExercise, onAddSet: () -> Unit, onRemoveSet: (Int) -> Unit, onUpdateSet: (Int, ActiveSet.() -> ActiveSet) -> Unit, onRemove: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(modifier = Modifier.padding(12.dp)) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), shape = RoundedCornerShape(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                    Surface(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) { Text(exercise.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Text(exercise.category, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Delete, contentDescription = "Entfernen", modifier = Modifier.size(18.dp)) }
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Delete, contentDescription = "Entfernen", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)) }
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Sat.", modifier = Modifier.width(32.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Wdh.", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                Text("kg", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                Text("RPE", modifier = Modifier.weight(0.7f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.width(32.dp))
-            }
-            exercise.sets.forEachIndexed { setIdx, set ->
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${setIdx + 1}", modifier = Modifier.width(32.dp).padding(vertical = 8.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(value = set.reps, onValueChange = { onUpdateSet(setIdx) { copy(reps = it) } }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp))
-                    OutlinedTextField(value = set.weightKg, onValueChange = { onUpdateSet(setIdx) { copy(weightKg = it) } }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp))
-                    OutlinedTextField(value = set.rpe, onValueChange = { onUpdateSet(setIdx) { copy(rpe = it) } }, modifier = Modifier.weight(0.7f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp), placeholder = { Text("-", textAlign = TextAlign.Center, fontSize = 14.sp) })
-                    IconButton(onClick = { onRemoveSet(setIdx) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Close, contentDescription = "Satz entfernen", modifier = Modifier.size(14.dp)) }
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Sat.", modifier = Modifier.width(32.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Wdh.", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        Text("kg", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        Text("RPE", modifier = Modifier.weight(0.7f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.width(32.dp))
+                    }
+                    exercise.sets.forEachIndexed { setIdx, set ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("${setIdx + 1}", modifier = Modifier.width(32.dp).padding(vertical = 8.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            OutlinedTextField(value = set.reps, onValueChange = { onUpdateSet(setIdx) { copy(reps = it) } }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline))
+                            OutlinedTextField(value = set.weightKg, onValueChange = { onUpdateSet(setIdx) { copy(weightKg = it) } }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline))
+                            OutlinedTextField(value = set.rpe, onValueChange = { onUpdateSet(setIdx) { copy(rpe = it) } }, modifier = Modifier.weight(0.7f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp), placeholder = { Text("-", textAlign = TextAlign.Center, fontSize = 14.sp, color = MaterialTheme.colorScheme.outline) }, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline))
+                            IconButton(onClick = { onRemoveSet(setIdx) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Close, contentDescription = "Satz entfernen", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    }
                 }
             }
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(modifier = Modifier.weight(1f))
                 TextButton(onClick = onAddSet, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp)); Text("Satz", fontSize = 11.sp) }
             }
@@ -611,10 +691,10 @@ fun WorkoutDetailScreen(modifier: Modifier = Modifier, api: ApiClient, workoutId
             )
         },
         bottomBar = {
-            Surface(modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
-                Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 8.dp) {
+                Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (isEditing) {
-                        OutlinedButton(onClick = { showExercisePicker = true }, modifier = Modifier.weight(1f).height(48.dp)) {
+                        OutlinedButton(onClick = { showExercisePicker = true }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp)) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Übung +")
@@ -646,14 +726,14 @@ fun WorkoutDetailScreen(modifier: Modifier = Modifier, api: ApiClient, workoutId
                                     isSaving = false
                                 }
                             },
-                            modifier = Modifier.weight(1f).height(48.dp),
+                            modifier = Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(12.dp)),
                             enabled = !isSaving
                         ) {
                             if (isSaving) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             else Text("Speichern")
                         }
                     } else {
-                        OutlinedButton(onClick = { showDeleteDialog = true }, modifier = Modifier.weight(1f).height(48.dp)) {
+                        OutlinedButton(onClick = { showDeleteDialog = true }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp)) {
                             Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Löschen", color = MaterialTheme.colorScheme.error)
@@ -663,7 +743,7 @@ fun WorkoutDetailScreen(modifier: Modifier = Modifier, api: ApiClient, workoutId
                                 availableExercises = api.getExercises(d.gymId ?: 1)
                                 enterEdit()
                             }
-                        }, modifier = Modifier.weight(1f).height(48.dp)) {
+                        }, modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp)) {
                             Text("Bearbeiten")
                         }
                     }
