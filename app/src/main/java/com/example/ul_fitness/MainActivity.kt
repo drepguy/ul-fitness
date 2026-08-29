@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -92,6 +93,7 @@ data class ActiveExercise(
 sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector) {
     data object Training : BottomNavItem("home", "Training", Icons.Default.Home)
     data object Uebungen : BottomNavItem("exercises", "Übungen", Icons.AutoMirrored.Filled.List)
+    data object Analyse : BottomNavItem("analysis", "Analyse", Icons.Default.DateRange)
 }
 
 @Composable
@@ -123,11 +125,11 @@ fun TrainingApp() {
 fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
-    val bottomItems = listOf(BottomNavItem.Training, BottomNavItem.Uebungen)
+    val bottomItems = listOf(BottomNavItem.Training, BottomNavItem.Uebungen, BottomNavItem.Analyse)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val isTopLevel = currentRoute in listOf("home", "exercises")
+    val isTopLevel = currentRoute in listOf("home", "exercises", "analysis")
 
     Scaffold(
         topBar = {
@@ -136,6 +138,7 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
                     title = {
                         Text(when (currentRoute) {
                             "exercises" -> "Übungen"
+                            "analysis" -> "Analyse"
                             else -> "UL Fitness"
                         })
                     },
@@ -197,6 +200,10 @@ fun MainScreen(api: ApiClient, onLogout: () -> Unit) {
                     api = api,
                     onBack = { navController.popBackStack() }
                 )
+            }
+
+            composable("analysis") {
+                AnalyseScreen(api = api)
             }
 
             composable(

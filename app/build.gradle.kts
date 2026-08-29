@@ -56,8 +56,6 @@ dependencies {
     implementation(libs.ktor.client.serialization.json)
     implementation(libs.ktor.client.logging)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.vico.compose)
-    implementation(libs.vico.compose.m3)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
