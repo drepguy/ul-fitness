@@ -1,24 +1,48 @@
 # AGENTS.md
 
 ## Project
-- Single-module Android app (`:app`) — package `com.example.ul_fitness`, namespace `com.example.ul_fitness`; planned KMP migration → `:shared` + `:composeApp` + `:server` per `spec.md:5` (v0.4.1).
-- Entry point: `app/src/main/java/com/example/ul_fitness/MainActivity.java:5` — launcher `Activity` with `activity_main.xml` (dark-only start screen: centered `ic_ul_logo.xml` + "UL FITNESS" title, `AppCompatDelegate.MODE_NIGHT_YES`).
-- AGP 9.3.2, Gradle 9.5.0, compileSdk/targetSdk 37, minSdk 24, `JavaVersion.VERSION_11` (toolchain resolved via foojay `gradle-daemon-jvm.properties` — JDK 25).
-- Version catalog at `gradle/libs.versions.toml` — add deps there, reference via `libs.*` in `app/build.gradle.kts`.
-- Git: `https://github.com/drepguy/ul-fitness.git` (`main`, `d89c204`+) — private; `spec.md:1` is source of truth (Deutsch, KG, RPE 1-10, 2 Studios). `.env` gitignored (`AGENTS.md:14`).
+- KMP Android app (`:app`) + shared module (`:shared`) + Ktor server (`:server`) — package `com.example.ul_fitness`, namespace `com.example.ul_fitness`.
+- Entry point: `app/src/main/java/com/example/ul_fitness/MainActivity.kt` — Kotlin Compose with `ComponentActivity`, Material3 dark theme, `TrainingApp()` composable.
+- AGP 9.3.2, Gradle 9.5.0, compileSdk/targetSdk 37, minSdk 24, `JavaVersion.VERSION_11`.
+- Version catalog at `gradle/libs.versions.toml` — add deps there, reference via `libs.*`.
+- Git: `https://github.com/drepguy/ul-fitness.git` (`main`) — private; `spec.md:1` is source of truth (Deutsch, KG, RPE 1-10, 2 Studios). `.env` gitignored.
 
 ## Build & Verify
 - Windows: `.\gradlew.bat <task>` · macOS/Linux: `./gradlew <task>`
-- Build: `.\gradlew.bat assembleDebug` (release has `optimization { enable = false }`)
-- Unit tests (host): `.\gradlew.bat :app:testDebugUnitTest` — single test: `.\gradlew.bat :app:testDebugUnitTest --tests "com.example.ul_fitness.ExampleUnitTest"`
-- Instrumented tests (device/emulator required): `.\gradlew.bat :app:connectedDebugAndroidTest` — single: `--tests "com.example.ul_fitness.ExampleInstrumentedTest"`
-- `gradle.properties` has `org.gradle.configuration-cache=true` — rerun with `--no-configuration-cache` if diagnosing cache issues.
-- `local.properties` must point to real SDK (currently `C:\AndroidSDK`); old template value `C:\Users\Aolrich\...` does not exist on this machine — update `sdk.dir` on other machines; file is gitignored. `JAVA_HOME` not on `PATH` by default — use Android Studio JBR: `$env:JAVA_HOME="C:\Users\<user>\AppData\Local\Programs\Android Studio\jbr"` before `gradlew`.
+- App build: `.\gradlew.bat :app:assembleDebug`
+- Server build: `.\gradlew.bat :server:build -x test`
+- Both: `.\gradlew.bat :app:assembleDebug :server:build -x test`
+- Unit tests (host): `.\gradlew.bat :app:testDebugUnitTest`
+- Instrumented tests (device/emulator required): `.\gradlew.bat :app:connectedDebugAndroidTest`
+- `gradle.properties` has `org.gradle.configuration-cache=true` — use `--no-configuration-cache` for debugging.
+- `local.properties` must point to real SDK (currently `C:\AndroidSDK`). `JAVA_HOME` not on `PATH` — use Android Studio JBR: `$env:JAVA_HOME="C:\Users\<user>\AppData\Local\Programs\Android Studio\jbr"`.
 - No lint/typecheck task configured beyond AGP defaults.
 
+## Server (Ktor + Exposed + Flyway + MariaDB)
+- Runs on `ai-vm` at `http://192.168.178.8:8080` (VPN-only, Tailscale subnet `192.168.178.0/24`).
+- `server/Dockerfile` — multi-stage build (eclipse-temurin:17). Deploy via: `docker compose build --no-cache api && docker compose up -d`.
+- `server/src/main/resources/db/migration/V1__init.sql` — schema + seed data (2 gyms, 10 exercises+aliases).
+- User: `ulrich@ulf.local` / `UlFitness2026!` (`ALLOW_REGISTER=false` after seed).
+- JWT: `java-jwt 4.4.0`, secret from env `JWT_SECRET`, access=15min, refresh=30d.
+
+### API (all routes under `/api/v1`, JSON camelCase)
+- `POST /auth/register` (403 when `ALLOW_REGISTER=false`), `POST /auth/login` → tokens, `POST /auth/refresh`
+- `GET /gyms`, `POST /gyms`, `PUT /gyms/{id}`, `DELETE /gyms/{id}`
+- `GET /exercises?gymId=&q=&category=`, `POST /exercises`, `PUT /exercises/{id}`, `DELETE /exercises/{id}`
+- `GET /exercises/{id}/aliases`, `PUT /exercises/{id}/aliases`
+- `GET /workouts?gymId=&limit=&offset=&since=`, `POST /workouts`, `GET /workouts/{id}`, `PATCH /workouts/{id}`, `PATCH /workouts/{id}/finish`, `DELETE /workouts/{id}`, `POST /workouts/from-last`
+- `GET /templates?gymId=`, `POST /templates`, `PUT /templates/{id}`, `DELETE /templates/{id}`, `POST /templates/{id}/start`
+- `GET /stats/progress?exerciseId=&from=&to=`, `GET /stats/prs?gymId=&limit=`
+
+### Known Issues
+- **`call.receive<T>()` broken** — Ktor content negotiation fails for all mutation routes. All routes use `call.receiveText()` + manual `Json.decodeFromString` as workaround.
+- **`composeBom` 2024.09.03** — Compose dependencies added but no full training flow yet.
+
 ## Structure
-- `app/build.gradle.kts:5` — `android { namespace, compileSdk, defaultConfig }`
-- `app/src/main/AndroidManifest.xml` — launcher `MainActivity` with `MAIN/LAUNCHER` intent; `android:exported="true"` required for targetSdk 37
-- `app/src/main/res/` — `drawable/ic_ul_logo.xml` (hexagon dumbbell logo), `layout/activity_main.xml`, `values/colors.xml` (`background_dark`), `values*/themes.xml` (dark `NoActionBar`)
-- `app/src/main/keepRules/rules.keep` — R8 rules (AGP combines all under `keepRules/`)
-- `settings.gradle.kts` — `pluginManagement` + `dependencyResolutionManagement` (FAIL_ON_PROJECT_REPOS)
+- `app/build.gradle.kts` — `android { namespace, compileSdk, defaultConfig }`, Compose BOM + Material3 + activity-compose
+- `shared/build.gradle.kts` — KMP JVM-only (serialization + coroutines), targets: `jvm()`
+- `server/build.gradle.kts` — Ktor server (Netty, Exposed, Flyway, HikariCP, MariaDB, JWT, jbcrypt)
+- `server/src/main/kotlin/com/example/ul_fitness/` — `Application.kt`, `DatabaseFactory.kt`, `db/Tables.kt`, `routes/*`, `security/JwtConfig.kt`
+- `app/src/main/res/` — `drawable/ic_ul_logo.xml`, `layout/activity_main.xml`, `values/colors.xml`, `values*/themes.xml`
+- `app/src/main/keepRules/rules.keep` — R8 rules
+- `docker-compose.yml` — db (mariadb:11) + api, port `8080` LAN-only
