@@ -14,6 +14,7 @@ import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -138,18 +139,31 @@ class ApiClient(private val context: Context) {
 
     suspend fun createWorkout(req: CreateWorkoutRequest): Long? {
         @Serializable data class IdResponse(val id: Long)
-        return authedPost<IdResponse, CreateWorkoutRequest>("workouts", req)?.id
+        return try {
+            val response = httpClient.post("workouts") {
+                header("Authorization", "Bearer ${getToken()}")
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+            android.util.Log.d("ApiClient", "createWorkout status=${response.status}")
+            android.util.Log.d("ApiClient", "createWorkout body=${response.bodyAsText()}")
+            response.body<IdResponse>().id
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "createWorkout failed", e)
+            null
+        }
     }
 
     suspend fun finishWorkout(id: Long): Boolean {
         val token = getToken() ?: return false
         return try {
-            httpClient.patch("workouts/$id/finish") {
+            val response = httpClient.patch("workouts/$id/finish") {
                 header("Authorization", "Bearer $token")
                 contentType(ContentType.Application.Json)
                 setBody(emptyMap<String, String>())
-            }.body<Map<String, Boolean>>()
-            true
+            }
+            android.util.Log.d("ApiClient", "finishWorkout status=${response.status}")
+            response.status == HttpStatusCode.OK
         } catch (e: Exception) {
             android.util.Log.e("ApiClient", "Finish workout failed", e)
             false
