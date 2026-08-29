@@ -452,7 +452,7 @@ fun ExerciseCard(exercise: ActiveExercise, onAddSet: () -> Unit, onRemoveSet: (I
             }
             Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(modifier = Modifier.weight(1f))
-                TextButton(onClick = onAddSet, modifier = Modifier.height(28.dp)) { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp)); Text("Satz", fontSize = 11.sp) }
+                TextButton(onClick = onAddSet, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp)); Text("Satz", fontSize = 11.sp) }
             }
         }
     }
