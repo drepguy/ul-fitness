@@ -9,13 +9,13 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
+
+private val json = Json { ignoreUnknownKeys = true }
 
 @Serializable data class GymDto(val id: Long?, val name: String, val city: String? = null, val isSystem: Boolean = false, val ownerId: Long? = null)
 @Serializable data class CreateGymRequest(val name: String, val city: String? = null)
@@ -32,7 +32,10 @@ fun Route.gymRoutes() {
         }
         post("/api/v1/gyms") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
-            val req = call.receive<CreateGymRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateGymRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@post
+            }
             if (req.name.isBlank()) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required")); return@post }
             val exists = transaction { Gyms.selectAll().where { (Gyms.ownerId eq uid) and (Gyms.name eq req.name) }.count() > 0 }
             if (exists) { call.respond(HttpStatusCode.Conflict, mapOf("error" to "gym exists")); return@post }
@@ -44,7 +47,10 @@ fun Route.gymRoutes() {
         put("/api/v1/gyms/{id}") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@put }
-            val req = call.receive<CreateGymRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateGymRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@put
+            }
             val updated = transaction { Gyms.update({ (Gyms.id eq id) and (Gyms.ownerId eq uid) }) { it[name] = req.name; it[city] = req.city } }
             if (updated == 0) call.respond(HttpStatusCode.NotFound) else call.respond(mapOf("ok" to true))
         }

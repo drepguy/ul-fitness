@@ -8,17 +8,18 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
+private val json = Json { ignoreUnknownKeys = true }
+
 @Serializable data class TemplateExerciseInput(val exerciseId: Long, val orderIdx: Int, val defaultSets: Int = 3, val defaultReps: Int? = null, val defaultWeightKg: Double? = null)
-@Serializable data class CreateTemplateRequest(val gymId: Long, val name: String, val exercises: List<TemplateExerciseInput>)
+@Serializable data class CreateTemplateRequest(val gymId: Long, val name: String, val exercises: List<TemplateExerciseInput> = emptyList())
 @Serializable data class TemplateExerciseDto(val exerciseId: Long, val name: String, val iconKey: String, val orderIdx: Int)
 @Serializable data class TemplateDto(val id: Long, val name: String, val gymId: Long, val exercises: List<TemplateExerciseDto>)
 
@@ -41,7 +42,10 @@ fun Route.templateRoutes() {
         }
         post("/api/v1/templates") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
-            val req = call.receive<CreateTemplateRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateTemplateRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@post
+            }
             val exists = transaction { WorkoutTemplates.selectAll().where { (WorkoutTemplates.userId eq uid) and (WorkoutTemplates.gymId eq req.gymId) and (WorkoutTemplates.name eq req.name) }.count() > 0 }
             if (exists) { call.respond(HttpStatusCode.Conflict); return@post }
             val id = transaction {
@@ -56,7 +60,10 @@ fun Route.templateRoutes() {
         put("/api/v1/templates/{id}") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@put }
-            val req = call.receive<CreateTemplateRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateTemplateRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@put
+            }
             transaction {
                 WorkoutTemplates.update({ (WorkoutTemplates.id eq id) and (WorkoutTemplates.userId eq uid) }) { it[name] = req.name; it[gymId] = req.gymId; it[updatedAt] = LocalDateTime.now() }
                 WorkoutTemplateExercises.deleteWhere { WorkoutTemplateExercises.templateId eq id }

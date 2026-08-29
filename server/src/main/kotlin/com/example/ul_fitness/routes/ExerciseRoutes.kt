@@ -10,13 +10,15 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
+
+private val json = Json { ignoreUnknownKeys = true }
 
 @Serializable data class ExerciseDto(val id: Long?, val name: String, val category: String, val kind: String, val iconKey: String, val gymId: Long? = null, val gymName: String? = null, val isSystem: Boolean = false, val ownerId: Long? = null, val aliases: List<String> = emptyList())
 @Serializable data class CreateExerciseRequest(val name: String, val category: String, val kind: String = "free_weight", val iconKey: String? = null, val gymId: Long? = null, val aliases: List<String> = emptyList())
@@ -61,7 +63,10 @@ fun Route.exerciseRoutes() {
 
         post("/api/v1/exercises") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
-            val req = call.receive<CreateExerciseRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateExerciseRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body: ${e.message}")); return@post
+            }
             if (req.name.isBlank()) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required")); return@post }
             if (req.kind == "machine" && req.gymId == null) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "machine needs gymId")); return@post }
             if (req.gymId != null) {
@@ -85,7 +90,10 @@ fun Route.exerciseRoutes() {
         put("/api/v1/exercises/{id}") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@put }
-            val req = call.receive<CreateExerciseRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateExerciseRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@put
+            }
             val updated = transaction {
                 Exercises.update({ (Exercises.id eq id) and (Exercises.ownerId eq uid) }) {
                     it[Exercises.name] = req.name
@@ -106,7 +114,10 @@ fun Route.exerciseRoutes() {
 
         put("/api/v1/exercises/{id}/aliases") {
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@put }
-            val req = call.receive<AliasUpdateRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<AliasUpdateRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@put
+            }
             transaction {
                 req.remove.forEach { al -> ExerciseAliases.deleteWhere { (ExerciseAliases.exerciseId eq id) and (ExerciseAliases.alias eq al) } }
                 req.add.forEach { al -> if (al.isNotBlank()) try { ExerciseAliases.insert { it[exerciseId] = id; it[alias] = al; it[createdAt] = LocalDateTime.now() } } catch (_: Exception) {} }

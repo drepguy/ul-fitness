@@ -8,19 +8,20 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
+private val json = Json { ignoreUnknownKeys = true }
+
 @Serializable data class SetInput(val reps: Int, val weightKg: Double, val isWarmup: Boolean = false, val rpe: Int? = null, val isFailure: Boolean = false, val note: String? = null)
 @Serializable data class WorkoutExerciseInput(val exerciseId: Long, val sets: List<SetInput>)
-@Serializable data class CreateWorkoutRequest(val gymId: Long, val startedAt: String? = null, val notes: String? = null, val exercises: List<WorkoutExerciseInput>)
+@Serializable data class CreateWorkoutRequest(val gymId: Long, val startedAt: String? = null, val notes: String? = null, val exercises: List<WorkoutExerciseInput> = emptyList())
 @Serializable data class WorkoutSummaryDto(val id: Long, val gymId: Long?, val gymName: String?, val startedAt: String, val endedAt: String?, val notes: String?)
 @Serializable data class SetDto(val reps: Int, val weightKg: Double, val isWarmup: Boolean, val rpe: Int?, val isFailure: Boolean, val note: String?)
 @Serializable data class WorkoutExerciseDto(val exerciseId: Long, val name: String, val iconKey: String, val sets: List<SetDto>)
@@ -30,7 +31,10 @@ fun Route.workoutRoutes() {
     authenticate("auth-jwt") {
         post("/api/v1/workouts") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
-            val req = call.receive<CreateWorkoutRequest>()
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<CreateWorkoutRequest>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body: ${e.message}")); return@post
+            }
             val gymExists = transaction { Gyms.selectAll().where { Gyms.id eq req.gymId }.count() > 0 }
             if (!gymExists) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "gym not found")); return@post }
             for (ex in req.exercises) {
@@ -114,7 +118,8 @@ fun Route.workoutRoutes() {
         patch("/api/v1/workouts/{id}/finish") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@patch }
-            val body = call.receiveText().let { try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<Map<String,String>>(it) } catch (e: Exception) { emptyMap<String,String>() } }
+            val text = call.receiveText()
+            val body = try { json.decodeFromString<Map<String,String>>(text) } catch (e: Exception) { emptyMap() }
             val ended = body["ended_at"]?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME) } ?: body["endedAt"]?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_DATE_TIME) } ?: LocalDateTime.now()
             val updated = transaction { Workouts.update({ (Workouts.id eq id) and (Workouts.userId eq uid) }) { it[endedAt] = ended } }
             if (updated==0) call.respond(HttpStatusCode.NotFound) else call.respond(mapOf("ok" to true))
@@ -123,7 +128,8 @@ fun Route.workoutRoutes() {
         patch("/api/v1/workouts/{id}") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@patch }
-            val body = call.receiveText().let { try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString<Map<String,String>>(it) } catch (e: Exception) { emptyMap<String,String>() } }
+            val text = call.receiveText()
+            val body = try { json.decodeFromString<Map<String,String>>(text) } catch (e: Exception) { emptyMap() }
             val gymId = body["gym_id"]?.toLongOrNull() ?: body["gymId"]?.toLongOrNull()
             val notes = body["notes"]
             if (gymId == null && notes == null) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "gym_id or notes required")); return@patch }
@@ -149,8 +155,9 @@ fun Route.workoutRoutes() {
 
         post("/api/v1/workouts/from-last") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
-            val body = call.receive<Map<String,Long>>()
-            val gymId = body["gymId"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "gymId required")); return@post }
+            val text = call.receiveText()
+            val body = try { json.decodeFromString<Map<String,String>>(text) } catch (e: Exception) { emptyMap() }
+            val gymId = body["gymId"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "gymId required")); return@post }
             val last = transaction { Workouts.selectAll().where { (Workouts.userId eq uid) and (Workouts.gymId eq gymId) }.orderBy(Workouts.startedAt to SortOrder.DESC).limit(1).singleOrNull() }
                 ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "no previous")); return@post }
             val newId = transaction {
