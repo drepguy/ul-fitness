@@ -250,7 +250,7 @@ fun AnalyseScreen(
                                 dates = chartDates,
                                 modifier = Modifier.fillMaxWidth().height(200.dp)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 "${dailyData.size} Trainingspunkte",
                                 style = MaterialTheme.typography.bodySmall,
