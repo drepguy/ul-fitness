@@ -370,7 +370,7 @@ fun SimpleLineChart(
 
     Canvas(modifier = modifier) {
         val paddingLeft = with(density) { 48.dp.toPx() }
-        val paddingBottom = with(density) { 40.dp.toPx() }
+        val paddingBottom = with(density) { 52.dp.toPx() }
         val paddingTop = with(density) { 16.dp.toPx() }
         val chartWidth = size.width - paddingLeft
         val chartHeight = size.height - paddingTop - paddingBottom
@@ -432,15 +432,16 @@ fun SimpleLineChart(
         }
 
         if (dates.isNotEmpty()) {
-            val maxLabels = (chartWidth / with(density) { 60.dp.toPx() }).toInt().coerceAtLeast(2)
+            val maxLabels = (chartWidth / with(density) { 40.dp.toPx() }).toInt().coerceAtLeast(2)
             val step = if (dates.size <= maxLabels) 1 else dates.size / maxLabels
-            for (i in dates.indices step step.coerceAtLeast(1)) {
+            val indicesToShow = (dates.indices step step.coerceAtLeast(1)).toMutableSet()
+            indicesToShow.add(dates.size - 1)
+            for (i in indicesToShow) {
                 val x = paddingLeft + stepX * i
+                drawContext.canvas.nativeCanvas.save()
+                drawContext.canvas.nativeCanvas.rotate(90f, x, size.height - 4f)
                 drawContext.canvas.nativeCanvas.drawText(dates[i], x, size.height - 4f, datePaint)
-            }
-            if ((dates.size - 1) % step.coerceAtLeast(1) != 0) {
-                val x = paddingLeft + stepX * (dates.size - 1)
-                drawContext.canvas.nativeCanvas.drawText(dates.last(), x, size.height - 4f, datePaint)
+                drawContext.canvas.nativeCanvas.restore()
             }
         }
     }
