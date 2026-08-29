@@ -43,6 +43,21 @@ data class CreateExerciseRequest(val name: String, val category: String, val kin
 data class AliasUpdateRequest(val add: List<String> = emptyList(), val remove: List<String> = emptyList())
 
 @Serializable
+data class ProgressPointDto(val date: String, val e1RM: Double, val volume: Double, val maxWeight: Double, val reps: Int)
+
+@Serializable
+data class AggregatedDayDto(val date: String, val e1RM: Double, val volume: Double, val maxWeight: Double, val totalSets: Int)
+
+@Serializable
+data class PrDto(val maxWeight: Double, val maxWeightDate: String?, val maxE1RM: Double, val maxE1RMDate: String?, val maxVolume: Double, val maxVolumeDate: String?)
+
+@Serializable
+data class DashboardStatsDto(val totalWorkouts: Int, val totalSets: Int, val totalVolume: Double, val workoutsPerWeek: Double, val exercisesTrained: Int, val periodDays: Int)
+
+@Serializable
+data class MonthlyVolumeDto(val month: String, val volume: Double, val workouts: Int)
+
+@Serializable
 data class WorkoutSummaryDto(val id: Long, val gymId: Long?, val gymName: String?, val startedAt: String, val endedAt: String?, val notes: String?)
 
 @Serializable
@@ -316,6 +331,91 @@ class ApiClient(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("ApiClient", "Finish workout failed", e)
             false
+        }
+    }
+
+    suspend fun getProgressDaily(exerciseId: Long, gymId: Long?, from: String?, to: String?): List<AggregatedDayDto> {
+        val token = getToken() ?: return emptyList()
+        return try {
+            val params = mutableListOf("exerciseId=$exerciseId")
+            gymId?.let { params.add("gymId=$it") }
+            from?.let { params.add("from=$it") }
+            to?.let { params.add("to=$it") }
+            val response = httpClient.get("stats/progress/daily?${params.joinToString("&")}") {
+                header("Authorization", "Bearer $token")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getProgressDaily failed", e)
+            emptyList()
+        }
+    }
+
+    suspend fun getProgressRaw(exerciseId: Long, gymId: Long?, from: String?, to: String?): List<ProgressPointDto> {
+        val token = getToken() ?: return emptyList()
+        return try {
+            val params = mutableListOf("exerciseId=$exerciseId")
+            gymId?.let { params.add("gymId=$it") }
+            from?.let { params.add("from=$it") }
+            to?.let { params.add("to=$it") }
+            val response = httpClient.get("stats/progress?${params.joinToString("&")}") {
+                header("Authorization", "Bearer $token")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getProgressRaw failed", e)
+            emptyList()
+        }
+    }
+
+    suspend fun getPrs(exerciseId: Long, gymId: Long?): PrDto {
+        val token = getToken() ?: return PrDto(0.0, null, 0.0, null, 0.0, null)
+        return try {
+            val params = mutableListOf("exerciseId=$exerciseId")
+            gymId?.let { params.add("gymId=$it") }
+            val response = httpClient.get("stats/prs?${params.joinToString("&")}") {
+                header("Authorization", "Bearer $token")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getPrs failed", e)
+            PrDto(0.0, null, 0.0, null, 0.0, null)
+        }
+    }
+
+    suspend fun getDashboard(gymId: Long?, from: String?, to: String?): DashboardStatsDto {
+        val token = getToken() ?: return DashboardStatsDto(0, 0, 0.0, 0.0, 0, 0)
+        return try {
+            val params = mutableListOf<String>()
+            gymId?.let { params.add("gymId=$it") }
+            from?.let { params.add("from=$it") }
+            to?.let { params.add("to=$it") }
+            val query = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
+            val response = httpClient.get("stats/dashboard$query") {
+                header("Authorization", "Bearer $token")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getDashboard failed", e)
+            DashboardStatsDto(0, 0, 0.0, 0.0, 0, 0)
+        }
+    }
+
+    suspend fun getMonthlyVolume(gymId: Long?, from: String?, to: String?): List<MonthlyVolumeDto> {
+        val token = getToken() ?: return emptyList()
+        return try {
+            val params = mutableListOf<String>()
+            gymId?.let { params.add("gymId=$it") }
+            from?.let { params.add("from=$it") }
+            to?.let { params.add("to=$it") }
+            val query = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
+            val response = httpClient.get("stats/monthly-volume$query") {
+                header("Authorization", "Bearer $token")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getMonthlyVolume failed", e)
+            emptyList()
         }
     }
 }
