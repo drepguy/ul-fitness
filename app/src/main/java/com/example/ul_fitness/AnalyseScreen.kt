@@ -439,7 +439,7 @@ fun SimpleLineChart(
             for (i in indicesToShow) {
                 val x = paddingLeft + stepX * i
                 drawContext.canvas.nativeCanvas.save()
-                drawContext.canvas.nativeCanvas.rotate(90f, x, size.height - 4f)
+                drawContext.canvas.nativeCanvas.rotate(-90f, x, size.height - 4f)
                 drawContext.canvas.nativeCanvas.drawText(dates[i], x, size.height - 4f, datePaint)
                 drawContext.canvas.nativeCanvas.restore()
             }
