@@ -265,11 +265,15 @@ fun HomeScreen(
     var gyms by remember { mutableStateOf<List<GymDto>>(emptyList()) }
     var recentWorkouts by remember { mutableStateOf<List<WorkoutSummaryDto>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var refreshKey by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        gyms = api.getGyms()
+    LaunchedEffect(refreshKey) {
+        isLoading = true
+        var g = api.getGyms()
+        if (g.isEmpty()) { kotlinx.coroutines.delay(1000); g = api.getGyms() }
+        gyms = g
         val all = mutableListOf<WorkoutSummaryDto>()
-        for (g in gyms) { all += api.getWorkouts(g.id ?: continue) }
+        for (gm in gyms) { all += api.getWorkouts(gm.id ?: continue) }
         recentWorkouts = all.sortedByDescending { it.startedAt }.take(20)
         isLoading = false
     }
