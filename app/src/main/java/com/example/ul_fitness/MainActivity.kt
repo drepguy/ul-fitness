@@ -603,7 +603,7 @@ fun WorkoutDetailScreen(
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
             item {
-                Text(d.gymName ?: "Training", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Training", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(formatLocalDateTime(d.startedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (d.endedAt != null) {
                     Text("bis ${formatLocalDateTime(d.endedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

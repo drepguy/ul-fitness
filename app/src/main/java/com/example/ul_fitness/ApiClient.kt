@@ -55,7 +55,7 @@ data class SetDetailDto(val reps: Int, val weightKg: Double, val isWarmup: Boole
 data class WorkoutExerciseDetailDto(val exerciseId: Long, val name: String, val iconKey: String, val sets: List<SetDetailDto>)
 
 @Serializable
-data class WorkoutDetailDto(val id: Long, val gymId: Long?, val gymName: String?, val startedAt: String, val endedAt: String?, val notes: String?, val exercises: List<WorkoutExerciseDetailDto>)
+data class WorkoutDetailDto(val id: Long, val gymId: Long?, val startedAt: String, val endedAt: String?, val notes: String?, val exercises: List<WorkoutExerciseDetailDto>)
 
 class ApiClient(private val context: Context) {
 
@@ -152,8 +152,10 @@ class ApiClient(private val context: Context) {
                 header("Authorization", "Bearer $token")
             }
             android.util.Log.d("ApiClient", "getWorkoutDetail status=${response.status}")
-            val body = response.bodyAsText()
-            android.util.Log.d("ApiClient", "getWorkoutDetail body=$body")
+            if (response.status != HttpStatusCode.OK) {
+                android.util.Log.e("ApiClient", "getWorkoutDetail failed: ${response.status}")
+                return null
+            }
             response.body()
         } catch (e: Exception) {
             android.util.Log.e("ApiClient", "getWorkoutDetail failed", e)
