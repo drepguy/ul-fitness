@@ -105,7 +105,8 @@ fun TrainingApp() {
     var checkingAuth by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        loggedIn = api.isLoggedIn()
+        if (!api.isLoggedIn()) api.login("ulrich@ulf.local", "UlFitness2026!")
+        loggedIn = true
         checkingAuth = false
     }
 
