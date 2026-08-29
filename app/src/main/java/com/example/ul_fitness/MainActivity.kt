@@ -87,7 +87,8 @@ data class ActiveExercise(
     val name: String,
     val category: String,
     val iconKey: String,
-    val sets: List<ActiveSet> = emptyList()
+    val sets: List<ActiveSet> = emptyList(),
+    val lastSets: List<ApiClient.LastSetDto> = emptyList()
 )
 
 sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector) {
@@ -338,8 +339,15 @@ fun ActiveWorkoutScreen(
     fun removeExercise(index: Int) { onExercisesChange(exercises.toMutableList().apply { removeAt(index) }) }
     fun addSet(exerciseIndex: Int) {
         val ex = exercises[exerciseIndex]
+        val nextIdx = ex.sets.size
+        val historySet = ex.lastSets.getOrNull(nextIdx)
         val lastSet = ex.sets.lastOrNull()
-        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, ex.copy(sets = ex.sets + ActiveSet(reps = lastSet?.reps ?: "10", weightKg = lastSet?.weightKg ?: "0", rpe = lastSet?.rpe ?: ""))) })
+        val newSet = if (historySet != null) {
+            ActiveSet(reps = historySet.reps.toString(), weightKg = if (historySet.weightKg == historySet.weightKg.toLong().toDouble()) historySet.weightKg.toLong().toString() else historySet.weightKg.toString(), rpe = historySet.rpe?.toString() ?: "")
+        } else {
+            ActiveSet(reps = lastSet?.reps ?: "10", weightKg = lastSet?.weightKg ?: "0", rpe = lastSet?.rpe ?: "")
+        }
+        onExercisesChange(exercises.toMutableList().apply { set(exerciseIndex, ex.copy(sets = ex.sets + newSet)) })
     }
     fun removeSet(exerciseIndex: Int, setIndex: Int) {
         val ex = exercises[exerciseIndex]
@@ -357,8 +365,18 @@ fun ActiveWorkoutScreen(
     if (showRestTimer) RestTimerOverlay(initialSeconds = restSeconds, onDismiss = { showRestTimer = false }, onDone = { showRestTimer = false })
     if (showExercisePicker) {
         ExercisePickerDialog(exercises = availableExercises, onDismiss = { showExercisePicker = false }, onSelect = { ex ->
-            onExercisesChange(exercises + ActiveExercise(id = ex.id ?: 0, name = ex.name, category = ex.category, iconKey = ex.iconKey, sets = listOf(ActiveSet())))
             showExercisePicker = false
+            scope.launch {
+                val lastSets = api.getLastSets(ex.id ?: 0, gymId)
+                val firstSet = lastSets.firstOrNull()?.let { ls ->
+                    ActiveSet(
+                        reps = ls.reps.toString(),
+                        weightKg = if (ls.weightKg == ls.weightKg.toLong().toDouble()) ls.weightKg.toLong().toString() else ls.weightKg.toString(),
+                        rpe = ls.rpe?.toString() ?: ""
+                    )
+                } ?: ActiveSet()
+                onExercisesChange(exercises + ActiveExercise(id = ex.id ?: 0, name = ex.name, category = ex.category, iconKey = ex.iconKey, sets = listOf(firstSet), lastSets = lastSets))
+            }
         })
     }
     if (showFinishDialog) {
@@ -479,13 +497,16 @@ fun WorkoutDetailScreen(modifier: Modifier = Modifier, api: ApiClient, workoutId
 
     fun addSet(exerciseIndex: Int) {
         val ex = editExercises[exerciseIndex]
+        val nextIdx = ex.sets.size
+        val historySet = ex.lastSets.getOrNull(nextIdx)
         val lastSet = ex.sets.lastOrNull()
+        val newSet = if (historySet != null) {
+            ActiveSet(reps = historySet.reps.toString(), weightKg = if (historySet.weightKg == historySet.weightKg.toLong().toDouble()) historySet.weightKg.toLong().toString() else historySet.weightKg.toString(), rpe = historySet.rpe?.toString() ?: "")
+        } else {
+            ActiveSet(reps = lastSet?.reps ?: "10", weightKg = lastSet?.weightKg ?: "0", rpe = lastSet?.rpe ?: "")
+        }
         editExercises = editExercises.toMutableList().apply {
-            set(exerciseIndex, ex.copy(sets = ex.sets + ActiveSet(
-                reps = lastSet?.reps ?: "10",
-                weightKg = lastSet?.weightKg ?: "0",
-                rpe = lastSet?.rpe ?: ""
-            )))
+            set(exerciseIndex, ex.copy(sets = ex.sets + newSet))
         }
     }
 
@@ -507,14 +528,18 @@ fun WorkoutDetailScreen(modifier: Modifier = Modifier, api: ApiClient, workoutId
 
     if (showExercisePicker) {
         ExercisePickerDialog(exercises = availableExercises, onDismiss = { showExercisePicker = false }, onSelect = { ex ->
-            editExercises = editExercises + ActiveExercise(
-                id = ex.id ?: 0,
-                name = ex.name,
-                category = ex.category,
-                iconKey = ex.iconKey,
-                sets = listOf(ActiveSet())
-            )
             showExercisePicker = false
+            scope.launch {
+                val lastSets = api.getLastSets(ex.id ?: 0, detail?.gymId)
+                val firstSet = lastSets.firstOrNull()?.let { ls ->
+                    ActiveSet(
+                        reps = ls.reps.toString(),
+                        weightKg = if (ls.weightKg == ls.weightKg.toLong().toDouble()) ls.weightKg.toLong().toString() else ls.weightKg.toString(),
+                        rpe = ls.rpe?.toString() ?: ""
+                    )
+                } ?: ActiveSet()
+                editExercises = editExercises + ActiveExercise(id = ex.id ?: 0, name = ex.name, category = ex.category, iconKey = ex.iconKey, sets = listOf(firstSet), lastSets = lastSets)
+            }
         })
     }
 

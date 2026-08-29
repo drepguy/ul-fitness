@@ -3,6 +3,9 @@ package com.example.ul_fitness.routes
 import com.example.ul_fitness.db.ExerciseAliases
 import com.example.ul_fitness.db.Exercises
 import com.example.ul_fitness.db.Gyms
+import com.example.ul_fitness.db.Sets
+import com.example.ul_fitness.db.WorkoutExercises
+import com.example.ul_fitness.db.Workouts
 import io.ktor.http.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
@@ -23,6 +26,7 @@ private val json = Json { ignoreUnknownKeys = true }
 @Serializable data class ExerciseDto(val id: Long?, val name: String, val category: String, val kind: String, val iconKey: String, val gymId: Long? = null, val gymName: String? = null, val isSystem: Boolean = false, val ownerId: Long? = null, val aliases: List<String> = emptyList())
 @Serializable data class CreateExerciseRequest(val name: String, val category: String, val kind: String = "free_weight", val iconKey: String? = null, val gymId: Long? = null, val aliases: List<String> = emptyList())
 @Serializable data class AliasUpdateRequest(val add: List<String> = emptyList(), val remove: List<String> = emptyList())
+@Serializable data class LastSetDto(val reps: Int, val weightKg: Double, val rpe: Int? = null)
 
 fun Route.exerciseRoutes() {
     authenticate("auth-jwt") {
@@ -130,6 +134,28 @@ fun Route.exerciseRoutes() {
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@delete }
             val deleted = transaction { Exercises.deleteWhere { (Exercises.id eq id) and ((Exercises.ownerId eq uid) or Exercises.ownerId.isNull()) } }
             if (deleted == 0) call.respond(HttpStatusCode.NotFound) else call.respond(HttpStatusCode.NoContent)
+        }
+
+        get("/api/v1/exercises/{id}/last-sets") {
+            val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
+            val exerciseId = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@get }
+            val gymId = call.request.queryParameters["gymId"]?.toLongOrNull()
+            val data = transaction {
+                val lastWorkout = Workouts.selectAll().where {
+                    (Workouts.userId eq uid) and (Workouts.endedAt.isNotNull()) and
+                    (gymId?.let { Workouts.gymId eq it } ?: Op.TRUE)
+                }.orderBy(Workouts.startedAt to SortOrder.DESC).toList().firstOrNull { w ->
+                    WorkoutExercises.selectAll().where { WorkoutExercises.workoutId eq w[Workouts.id] and (WorkoutExercises.exerciseId eq exerciseId) }.count() > 0
+                } ?: return@transaction null
+                val we = WorkoutExercises.selectAll().where {
+                    WorkoutExercises.workoutId eq lastWorkout[Workouts.id] and (WorkoutExercises.exerciseId eq exerciseId)
+                }.singleOrNull() ?: return@transaction null
+                Sets.selectAll().where { Sets.workoutExerciseId eq we[WorkoutExercises.id] }
+                    .orderBy(Sets.setNo to SortOrder.ASC).map {
+                        LastSetDto(it[Sets.reps], it[Sets.weightKg].toDouble(), it[Sets.rpe])
+                    }
+            }
+            call.respond(data ?: emptyList<Any>())
         }
     }
 }

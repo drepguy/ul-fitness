@@ -418,4 +418,23 @@ class ApiClient(private val context: Context) {
             emptyList()
         }
     }
+
+    @Serializable
+    data class LastSetDto(val reps: Int, val weightKg: Double, val rpe: Int? = null)
+
+    suspend fun getLastSets(exerciseId: Long, gymId: Long?): List<LastSetDto> {
+        val token = getToken() ?: return emptyList()
+        return try {
+            val params = mutableListOf<String>()
+            gymId?.let { params.add("gymId=$it") }
+            val query = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
+            val response = httpClient.get("exercises/$exerciseId/last-sets$query") {
+                header("Authorization", "Bearer $token")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getLastSets failed", e)
+            emptyList()
+        }
+    }
 }
