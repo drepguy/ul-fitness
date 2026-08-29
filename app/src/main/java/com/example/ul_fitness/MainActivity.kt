@@ -56,10 +56,13 @@ class MainActivity : ComponentActivity() {
 
 fun formatLocalDateTime(isoString: String): String {
     return try {
-        val parsed = LocalDateTime.parse(isoString.take(19))
-        val local = parsed.atZone(ZoneId.systemDefault())
+        val cleaned = isoString.replace(",", ".").take(26)
+        val parsed = LocalDateTime.parse(cleaned)
+        val utc = parsed.atZone(ZoneId.of("UTC"))
+        val local = utc.withZoneSameInstant(ZoneId.systemDefault())
         local.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm", Locale.GERMAN))
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        android.util.Log.e("FormatDate", "Failed to parse: '$isoString'", e)
         isoString.take(16)
     }
 }

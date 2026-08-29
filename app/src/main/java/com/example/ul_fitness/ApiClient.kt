@@ -145,7 +145,21 @@ class ApiClient(private val context: Context) {
     suspend fun getGyms(): List<GymDto> = authedGet("gyms") ?: emptyList()
     suspend fun getExercises(gymId: Long): List<ExerciseDto> = authedGet("exercises?gymId=$gymId") ?: emptyList()
     suspend fun getWorkouts(gymId: Long): List<WorkoutSummaryDto> = authedGet("workouts?gymId=$gymId") ?: emptyList()
-    suspend fun getWorkoutDetail(id: Long): WorkoutDetailDto? = authedGet("workouts/$id")
+    suspend fun getWorkoutDetail(id: Long): WorkoutDetailDto? {
+        val token = getToken() ?: return null
+        return try {
+            val response = httpClient.get("workouts/$id") {
+                header("Authorization", "Bearer $token")
+            }
+            android.util.Log.d("ApiClient", "getWorkoutDetail status=${response.status}")
+            val body = response.bodyAsText()
+            android.util.Log.d("ApiClient", "getWorkoutDetail body=$body")
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getWorkoutDetail failed", e)
+            null
+        }
+    }
 
     suspend fun updateWorkoutNotes(id: Long, notes: String): Boolean {
         val token = getToken() ?: return false
