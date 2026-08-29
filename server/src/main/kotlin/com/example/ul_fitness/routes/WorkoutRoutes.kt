@@ -153,6 +153,50 @@ fun Route.workoutRoutes() {
             if (deleted==0) call.respond(HttpStatusCode.NotFound) else call.respond(HttpStatusCode.NoContent)
         }
 
+        put("/api/v1/workouts/{id}/exercises") {
+            val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
+            val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@put }
+            val text = call.receiveText()
+            val req = try { json.decodeFromString<List<WorkoutExerciseInput>>(text) } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body: ${e.message}")); return@put
+            }
+            val owns = transaction { Workouts.selectAll().where { (Workouts.id eq id) and (Workouts.userId eq uid) }.count() > 0 }
+            if (!owns) { call.respond(HttpStatusCode.NotFound); return@put }
+            for (ex in req) {
+                val row = transaction { Exercises.selectAll().where { Exercises.id eq ex.exerciseId }.singleOrNull() }
+                    ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "exercise ${ex.exerciseId} not found")); return@put }
+                for (s in ex.sets) {
+                    if (s.reps < 0) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "reps >=0")); return@put }
+                    if (s.weightKg < 0) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "weight >=0")); return@put }
+                    s.rpe?.let { if (it !in 1..10) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "rpe 1-10")); return@put } }
+                }
+            }
+            transaction {
+                val wes = WorkoutExercises.selectAll().where { WorkoutExercises.workoutId eq id }.map { it[WorkoutExercises.id] }
+                for (weId in wes) {
+                    Sets.deleteWhere { Sets.workoutExerciseId eq weId }
+                }
+                WorkoutExercises.deleteWhere { WorkoutExercises.workoutId eq id }
+                req.forEachIndexed { idx, ex ->
+                    val weId = WorkoutExercises.insert { it[workoutId] = id; it[exerciseId] = ex.exerciseId; it[orderIdx] = idx }[WorkoutExercises.id]
+                    ex.sets.forEachIndexed { sIdx, s ->
+                        Sets.insert {
+                            it[workoutExerciseId] = weId
+                            it[setNo] = sIdx + 1
+                            it[reps] = s.reps
+                            it[weightKg] = BigDecimal(s.weightKg)
+                            it[isWarmup] = s.isWarmup
+                            it[rpe] = s.rpe
+                            it[isFailure] = s.isFailure
+                            it[note] = s.note
+                            it[createdAt] = LocalDateTime.now()
+                        }
+                    }
+                }
+            }
+            call.respond(mapOf("ok" to true))
+        }
+
         post("/api/v1/workouts/from-last") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val text = call.receiveText()

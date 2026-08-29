@@ -1,0 +1,1 @@
+ALTER TABLE exercises MODIFY COLUMN category VARCHAR(20) NOT NULL DEFAULT 'other';

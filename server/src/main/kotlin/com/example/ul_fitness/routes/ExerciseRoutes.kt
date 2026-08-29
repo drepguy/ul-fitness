@@ -95,7 +95,7 @@ fun Route.exerciseRoutes() {
                 call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@put
             }
             val updated = transaction {
-                Exercises.update({ (Exercises.id eq id) and (Exercises.ownerId eq uid) }) {
+                Exercises.update({ (Exercises.id eq id) and ((Exercises.ownerId eq uid) or Exercises.ownerId.isNull()) }) {
                     it[Exercises.name] = req.name
                     it[Exercises.category] = req.category
                     it[Exercises.kind] = req.kind
@@ -128,7 +128,7 @@ fun Route.exerciseRoutes() {
         delete("/api/v1/exercises/{id}") {
             val uid = call.principal<JWTPrincipal>()!!.payload.getClaim("uid").asLong()
             val id = call.parameters["id"]?.toLongOrNull() ?: run { call.respond(HttpStatusCode.BadRequest); return@delete }
-            val deleted = transaction { Exercises.deleteWhere { (Exercises.id eq id) and (Exercises.ownerId eq uid) } }
+            val deleted = transaction { Exercises.deleteWhere { (Exercises.id eq id) and ((Exercises.ownerId eq uid) or Exercises.ownerId.isNull()) } }
             if (deleted == 0) call.respond(HttpStatusCode.NotFound) else call.respond(HttpStatusCode.NoContent)
         }
     }

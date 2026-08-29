@@ -37,6 +37,12 @@ data class GymDto(val id: Long?, val name: String, val city: String? = null, val
 data class ExerciseDto(val id: Long?, val name: String, val category: String, val kind: String, val iconKey: String, val gymId: Long? = null, val gymName: String? = null, val isSystem: Boolean = false, val aliases: List<String> = emptyList())
 
 @Serializable
+data class CreateExerciseRequest(val name: String, val category: String, val kind: String = "machine", val iconKey: String? = null, val gymId: Long? = null, val aliases: List<String> = emptyList())
+
+@Serializable
+data class AliasUpdateRequest(val add: List<String> = emptyList(), val remove: List<String> = emptyList())
+
+@Serializable
 data class WorkoutSummaryDto(val id: Long, val gymId: Long?, val gymName: String?, val startedAt: String, val endedAt: String?, val notes: String?)
 
 @Serializable
@@ -144,6 +150,79 @@ class ApiClient(private val context: Context) {
 
     suspend fun getGyms(): List<GymDto> = authedGet("gyms") ?: emptyList()
     suspend fun getExercises(gymId: Long): List<ExerciseDto> = authedGet("exercises?gymId=$gymId") ?: emptyList()
+
+    suspend fun createExercise(req: CreateExerciseRequest): Long? {
+        @Serializable data class IdResponse(val id: Long)
+        return try {
+            val response = httpClient.post("exercises") {
+                header("Authorization", "Bearer ${getToken()}")
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+            android.util.Log.d("ApiClient", "createExercise status=${response.status}")
+            if (response.status != HttpStatusCode.Created) return null
+            response.body<IdResponse>().id
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "createExercise failed", e)
+            null
+        }
+    }
+
+    suspend fun updateExercise(id: Long, req: CreateExerciseRequest): Boolean {
+        val token = getToken() ?: return false
+        return try {
+            val response = httpClient.put("exercises/$id") {
+                header("Authorization", "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+            android.util.Log.d("ApiClient", "updateExercise status=${response.status}")
+            response.status == HttpStatusCode.OK
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "updateExercise failed", e)
+            false
+        }
+    }
+
+    suspend fun deleteExercise(id: Long): Boolean {
+        val token = getToken() ?: return false
+        return try {
+            val response = httpClient.delete("exercises/$id") {
+                header("Authorization", "Bearer $token")
+            }
+            response.status == HttpStatusCode.NoContent || response.status == HttpStatusCode.OK
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "deleteExercise failed", e)
+            false
+        }
+    }
+
+    suspend fun getAliases(id: Long): List<String> {
+        return try {
+            val response = httpClient.get("exercises/$id/aliases") {
+                header("Authorization", "Bearer ${getToken()}")
+            }
+            response.body()
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "getAliases failed", e)
+            emptyList()
+        }
+    }
+
+    suspend fun updateAliases(id: Long, add: List<String>, remove: List<String>): Boolean {
+        val token = getToken() ?: return false
+        return try {
+            val response = httpClient.put("exercises/$id/aliases") {
+                header("Authorization", "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(AliasUpdateRequest(add, remove))
+            }
+            response.status == HttpStatusCode.OK
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "updateAliases failed", e)
+            false
+        }
+    }
     suspend fun getWorkouts(gymId: Long): List<WorkoutSummaryDto> = authedGet("workouts?gymId=$gymId") ?: emptyList()
     suspend fun getWorkoutDetail(id: Long): WorkoutDetailDto? {
         val token = getToken() ?: return null
@@ -187,6 +266,22 @@ class ApiClient(private val context: Context) {
             response.status == HttpStatusCode.NoContent || response.status == HttpStatusCode.OK
         } catch (e: Exception) {
             android.util.Log.e("ApiClient", "deleteWorkout failed", e)
+            false
+        }
+    }
+
+    suspend fun replaceWorkoutExercises(workoutId: Long, exercises: List<WorkoutExerciseInput>): Boolean {
+        val token = getToken() ?: return false
+        return try {
+            val response = httpClient.put("workouts/$workoutId/exercises") {
+                header("Authorization", "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(exercises)
+            }
+            android.util.Log.d("ApiClient", "replaceWorkoutExercises status=${response.status}")
+            response.status == HttpStatusCode.OK
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "replaceWorkoutExercises failed", e)
             false
         }
     }

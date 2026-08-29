@@ -1,6 +1,6 @@
 # UL Fitness — Spec
 
-**Version:** 0.4.3 — 2026-08-30  
+**Version:** 0.4.4 — 2026-08-29  
 **Status:** Draft (agreed stack: Kotlin Compose Multiplatform + Ktor + MariaDB, Tailscale LXC subnet router; RPE 1-10; 2 gyms + extensible; UI Deutsch, KG, `exercise_aliases`; ~/-deploy, single user v1, Vorlagen: beides; 1 Gerät → n Übungen; UI einfach→mächtig; Icons)  
 **Repo:** `https://github.com/drepguy/ul-fitness.git` (`main`) — single-module `:app` today, to become `:shared` + `:composeApp` + `:server`
 
@@ -12,7 +12,7 @@ Personal, private fitness app to **track sets × reps × weight per exercise/mac
 
 Current reality: **2 gyms** — **Thomas Sport Center** (Upper Body) and **All Inclusive Fitness** (Legs + Core). User picks **gym → exercises/machines for that gym** (or creates new ones inline) → logs sets. Spec treats gyms first-class and extensible (N gyms), exercises/machines unified but filterable by gym.
 
-Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (foojay), `MainActivity.java:5` dark splash (`ic_ul_logo.xml` + `UL FITNESS`), `BuildConfig` not yet KMP — greenfield for domain.
+Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37, `MainActivity.kt` dark theme Compose (`ic_ul_logo.xml` + `UL FITNESS`), `BuildConfig` API_BASE_URL, App uses Ktor HTTP client + DataStore for JWT. Full KMP deferred — shared module is JVM-only (serialization + coroutines).
 
 ## 2. Goals / Non-Goals
 
@@ -39,10 +39,10 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 
 | Layer | Choice | Why | Version |
 |---|---|---|---|
-| App | **Kotlin Compose Multiplatform** (CMP) | Shared `domain/data/ui` now Android-only, later iOS/Desktop; Compose replaces Views+Java | Kotlin 2.1.20, CMP 1.7.3, AGP 9.3.2 |
-| App state | `ViewModel` + `Koin 4` + `Navigation Compose`/`Voyager` | KMP-friendly, no Hilt | — |
-| App local data | **SQLDelight 2.0** (or Room-KMP 2.6) + `DataStore` + `WorkManager` | SQLDelight is KMP-proven; Room-KMP viable alternative | — |
-| App charts | `Vico 2.0` (or `KMPCharts`) | CMP; `MPAndroidChart` is Views-only | — |
+| App | **Kotlin Compose** (Android) | Material3 dark theme, ComponentActivity, Navigation Compose | Kotlin 2.1.20, AGP 9.3.2, Compose BOM 2024.09.03 |
+| App state | Compose state (`remember`/`mutableStateOf`) + `CoroutineScope` | Lightweight, no ViewModel/Koin yet | — |
+| App local data | **DataStore** (JWT tokens) + `SharedPreferences` | SQLDelight deferred (Gradle 9.5 incompatible); server is source of truth | — |
+| App charts | `Vico 2.0` (planned) | CMP; `MPAndroidChart` is Views-only | — |
 | Backend | **Ktor 3.1** (Netty) + `Exposed 0.60` + `HikariCP` + `Flyway` | Kotlin sharing, lightweight, personal | — |
 | DB | **MariaDB 11** (Docker) | Required by spec | mariadb:11 |
 | Auth | JWT (access 15m + refresh 30d, `bcrypt`) | Multi-user; Tailscale alone not enough for row isolation | — |
@@ -53,31 +53,32 @@ Current codebase (`AGENTS.md:3`): AGP 9.3.2 / Gradle 9.5.0 / SDK 37 / JDK 25 (fo
 ## 5. Architecture
 
 ```
-composeApp (Android, Deutsch)           ai-vm (192.168.178.8, Ubuntu, Docker, kein Tailscale-Daemon)
-┌─ shared/commonMain ─┐                ┌─ ~/ul-fitness/docker-compose.yml ─┐
-│ domain/model        │   Ktor client  │ api:ktor:8080 ──► db:3306 (mariadb:11, vol db-data)
-│ data/SqlDelight     │ ──JWT/HTTP───► │   Exposed+Flyway+JWT  LAN-only (via LXC Subnet)
-│ ui/Compose (Vico)   │  http://192.168.178.8:8080 │  0.0.0.0:8080, kein Port-Forward, kein MagicDNS
-└─────────────────────┘  (nur via Tailnet └──────────────────────────────┘
-                         + genehmigte Subnet-Route 192.168.178.0/24 erreichbar)
-         ▲ WorkManager SyncWorker (nur wenn Tailnet/Subnet erreichbar, last-write-wins)
-                           LXC (100.88.114.99, Subnet-Router 192.168.178.0/24) ──► ai-vm (192.168.178.8)
+Android App (Kotlin Compose)              ai-vm (192.168.178.8, Ubuntu, Docker, kein Tailscale-Daemon)
+┌─ :app module ──────────┐                ┌─ ~/ul-fitness/docker-compose.yml ─┐
+│ MainActivity.kt         │   Ktor client  │ api:ktor:8080 ──► db:3306 (mariadb:11, vol db-data)
+│ LoginScreen             │ ──JWT/HTTP───► │   Exposed+Flyway+JWT  LAN-only (via LXC Subnet)
+│ HomeScreen              │  http://192.168.178.8:8080 │  0.0.0.0:8080, kein Port-Forward, kein MagicDNS
+│ ActiveWorkoutScreen     │ (nur via Tailnet └──────────────────────────────┘
+│ WorkoutDetailScreen     │  + genehmigte Subnet-Route 192.168.178.0/24 erreichbar)
+│ ExerciseListScreen      │
+└─────────────────────────┘
+         ▲ DataStore (JWT tokens)
 ```
 
- **Repo layout (planned)**
+ **Repo layout (current)**
 ```
-settings.gradle.kts → include(":shared", ":composeApp", ":server")
-gradle/libs.versions.toml → kotlin, compose-jb, ktor, sqlDelight, vico, koin
-shared/  → commonMain(domain, data db/api, ui screens/viewmodels + German strings)
-composeApp/ → androidMain (ComponentActivity setContent{ UlFitnessApp() })
-server/  → src/main/kotlin (ktor app, routes, exposed entities, flyway V1__*.sql), Dockerfile
+settings.gradle.kts → include(":app", ":shared", ":server")
+gradle/libs.versions.toml → kotlin, composeBom, ktor, navigationCompose
+app/   → Android app (Compose, Material3, Ktor client, DataStore, Navigation Compose)
+shared/  → JVM-only module (serialization + coroutines) — KMP deferred
+server/  → src/main/kotlin (ktor app, routes, exposed entities, flyway V1/V2__*.sql), Dockerfile
 docker-compose.yml, .env (gitignored: JWT_SECRET, DB_PASSWORD) — kein Caddy nötig (HTTP im Tailnet)
 ```
 
 ## 6. Data Model (MariaDB, Flyway)
 
 ```sql
--- V1__init.sql
+-- V1__init.sql + V2__category_to_varchar.sql
 CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -99,7 +100,7 @@ CREATE TABLE exercises (
   owner_id BIGINT NULL, -- NULL = system exercise
   gym_id BIGINT NULL, -- NULL = available at every gym (e.g. Bench Press, Squat); NOT NULL = machine/equipment only at that gym
   name VARCHAR(120) NOT NULL,
-  category ENUM('push','pull','legs','core','full','cardio','other') NOT NULL,
+  category VARCHAR(20) NOT NULL DEFAULT 'other', -- changed from ENUM in V2 for German labels (Brust, Rücken, Beine, Schulter, Arme, Core, Ganzkörper, Cardio)
   kind ENUM('free_weight','machine','cable','bodyweight','other') NOT NULL DEFAULT 'free_weight',
   icon_key VARCHAR(40) NOT NULL DEFAULT 'dumbbell', -- Katalog: dumbbell, barbell, leg_press, leg_ext, leg_curl, calf, hip_thrust, chest_press, lat_pull, row, shoulder_press, lateral_raise, face_pull, bicep_curl, triceps, ab_machine, hyperext
   is_system BOOLEAN NOT NULL DEFAULT FALSE,
@@ -173,7 +174,8 @@ CREATE TABLE workout_template_exercises (
   FOREIGN KEY (template_id) REFERENCES workout_templates(id) ON DELETE CASCADE,
   FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE
 );
--- V2 candidate: body_metrics(id,user_id,date,weight_kg,body_fat)
+-- V2: category ENUM → VARCHAR(20) for German labels (applied)
+-- V3 candidate: body_metrics(id,user_id,date,weight_kg,body_fat)
 -- seed in V1 (2 gyms + canonical machines/exercises derived from real logs 2025-2026):
 -- gyms: Thomas Sport Center (Upper), All Inclusive Fitness (Legs/Core)
 -- INSERT INTO gyms(owner_id,name,is_system) VALUES (NULL,'Thomas Sport Center',TRUE),(NULL,'All Inclusive Fitness',TRUE);
@@ -233,10 +235,10 @@ CREATE TABLE workout_template_exercises (
 **Exercises / Machines** (unified, German names, mit Icon)
 - `GET /exercises?gymId=&q=&category=&include_system=true` → `[{id,name,category,kind,icon_key,gym_id,gym_name,is_system,owner_id,aliases:[...]}]` — when `gymId` set, returns `gym_id IS NULL` (global) **plus** `gym_id = ?` (machines for that gym), sorted machines last. `q` matches `name` **and** `exercise_aliases.alias`. `icon_key` ∈ Katalog unten.
 - `POST /exercises {name,category,kind,icon_key?,gym_id?,aliases?:[string]}` → `201 {id}` — `kind=machine` requires `gym_id`; `icon_key` default `dumbbell` wenn nicht angegeben. Validation: `gym_id` must be system or owned by me.
-- `PUT /exercises/{id} {name,category,kind,icon_key,gym_id}` (only own) → `200` — ändert Icon.
+- `PUT /exercises/{id} {name,category,kind,icon_key,gym_id}` (own or system exercises) → `200` — ändert Icon. System exercises (owner_id NULL) can be edited by any user.
 - `PUT /exercises/{id}/aliases {add:[], remove:[]}` → `200` — manage aliases
 - `GET /exercises/{id}/aliases` → `[{alias}]`
-- `DELETE /exercises/{id}` (only own, soft if referenced)
+- `DELETE /exercises/{id}` (own or system exercises, soft if referenced)
 
 **Icon-Katalog** (`drawable/ic_exercise_<key>.xml`, 16 Keys, dunkles Hexagon wie `ic_ul_logo.xml`):
 `dumbbell`, `barbell`, `leg_press`, `leg_ext`, `leg_curl`, `calf`, `hip_thrust`, `chest_press`, `lat_pull`, `row`, `shoulder_press`, `lateral_raise`, `face_pull`, `bicep_curl`, `triceps`, `ab_machine`, `hyperext` (Fallback `dumbbell`). Wahl im `Neu anlegen`-Dialog (Grid, Icon groß), später änderbar.
@@ -247,6 +249,7 @@ CREATE TABLE workout_template_exercises (
 - `GET /workouts/{id}` (full graph + `gym` + `gym_name` at top)
 - `PATCH /workouts/{id}/finish {ended_at}` / `PATCH /workouts/{id} {gym_id, notes}` (pre-finish)
 - `DELETE /workouts/{id}`
+- `PUT /workouts/{id}/exercises [{exerciseId, sets:[{reps,weight_kg,is_warmup?,rpe?,is_failure,note?}]}]` → `200` — replaces all exercises+sets for a workout atomically. Validates ownership and exercise-gym compatibility. Used for full workout editing.
 
 **Templates** (beides: letztes Training + Vorlagen — per Entscheidung)
 - `GET /templates?gymId=` → `[{id,name,gym_id, exercises:[{exerciseId,name,order_idx,default_sets}]}]`
@@ -268,7 +271,7 @@ CREATE TABLE workout_template_exercises (
 
 **Prinzip:** Standardweg `≤3 Taps/Satz` (große Targets 56dp, Haptik, einhändig), Details (RPE/Notiz/Warmup/Alias/Vorlage) immer ein Tap/Long-Press entfernt. Dunkel `#0F0F0F`, Deutsch.
 
-**Navigation (Bottom, dunkel):** `Start` | `Training` | `Verlauf` | `Fortschritt` | `≡ Verwalten` — `Training` primär (FAB `Training starten`).
+**Navigation (Bottom, dunkel):** `Training` (Home) | `Übungen` (Exercise Management)
 
 **Screens**
 
@@ -394,20 +397,16 @@ curl http://192.168.178.8:8080/api/v1/health # {"status":"ok"}  # verifiziert PC
 ## 13. Build & Run (dev)
 
 ```powershell
-# Android (emulator, VPN not required for UI; needs Tailnet for sync)
+# Android (needs Tailnet for API)
 $env:JAVA_HOME="C:\Users\<user>\AppData\Local\Programs\Android Studio\jbr"
-.\gradlew.bat :composeApp:assembleDebug
-.\gradlew.bat :shared:testDebugUnitTest
+.\gradlew.bat :app:assembleDebug
 
 # Server
-.\gradlew.bat :server:run # local H2/Maria via Testcontainers
+.\gradlew.bat :server:build -x test
 docker compose up --build
-
-# Single test
-.\gradlew.bat :composeApp:testDebugUnitTest --tests "*WorkoutRepositoryTest*"
 ```
 
-`gradle/libs.versions.toml` holds `kotlin`, `compose-multiplatform`, `ktor`, `sqlDelight`, `vico`, `koin`.
+`gradle/libs.versions.toml` holds `kotlin`, `composeBom`, `ktor`, `navigationCompose`.
 
 ## 14. Config
 
@@ -422,6 +421,7 @@ docker compose up --build
 - Unit: `shared` domain (e1RM), `Flyway` migrations, Ktor routes (`testApplication`).
 - Instrumented: Compose `createAndroidComposeRule` for Workout screen (tap log, timer).
 - Manual: airplane mode → log 2 sets → reconnect Tailnet → `GET /workouts?since` returns synced.
+- Build commands: `.\gradlew.bat :app:assembleDebug` (app), `.\gradlew.bat :server:build -x test` (server).
 
 ## 16. Out of Scope (v1)
 
@@ -438,15 +438,17 @@ iOS/Desktop targets (KMP ready but ungenerated), body-metrics, CSV export, routi
 - **Machine/exercise input from real logs (2026-08-29):** See Appendix 19; decimal `47,5` comma, `body` weight (ignoriert), `y` typo handling → parser + `exercise_aliases` Tabelle.
 - **Restliche Fragen 2026-08-30:** Deploy `~/ul-fitness` (einfach, `ssh ulrich@ai-vm`), Auth nur du v1, Vorlagen **beides** (letztes kopieren + gespeicherte `workout_templates` je Studio), TLS **HTTP** im Tailnet + **wöchentliches Backup**.
 - **1 Gerät → n Übungen (2026-08-30):** Beinpresse horizontal/45° je für Quads + Waden = 4 Übungen auf 2 Geräten; plus sitzende Wadenheber + separate Waden Thomas. Modell `exercises(gym_id,name)` bildet das ab; Nutzer legt jederzeit neue `Geräte/Übungen` an.
+- **Category VARCHAR (2026-08-29):** Changed from ENUM to VARCHAR(20) in V2 to support German category labels (Brust, Rücken, Beine, Schulter, Arme, Core, Ganzkörper, Cardio). Client CATEGORY_LIST defines available values.
+- **Exercise CRUD for system exercises (2026-08-29):** PUT/DELETE on exercises now allows editing system exercises (owner_id NULL) in addition to user-owned exercises. This enables customizing seeded exercises.
 
 ## 18. Phases
 
-- **P0 (0.5d):** Subnet-Route `192.168.178.0/24` in LXC approved (verifiziert `tailscale` + Handy `http://192.168.178.8:8080/api/v1/health` → `ok`), `docker-compose.yml` in `~/ul-fitness` health.
-- **P1 (1.5d):** Flyway V1 (gyms + exercises.gym_id + workouts.gym_id + sets.is_warmup + exercise_aliases + workout_templates), seed `Thomas Sport Center` / `All Inclusive Fitness` + Aliase + Maschinen aus Anhang 19, JWT (nur du, `ALLOW_REGISTER=false`), gym/exercise/workout/template CRUD.
-- **P2 (2.5d):** CMP scaffold (`shared/composeApp`), SQLDelight (gyms/aliases/templates), Trainingsscreen **Gym → Vorlage/Letztes → Übungs-Picker + inline anlegen** + `reps×weight` Parser (Komma) + Pausentimer + RPE 1-10 (Deutsch).
-- **P3 (1d):** `SyncWorker`, `BuildConfig http://192.168.178.8:8080`, Offline-Banner.
-- **P4 (1.5d):** Vico Fortschritt + PRs mit Studio-Filter (Warmup/Bodyweight ausgeschlossen).
-- **P5 (0.5d):** LAN-only, `network_security_config.xml` für `http://192.168.178.8`, Signing, `AGENTS.md` Update (Module `shared`/`server`/`composeApp`, Deploy `ssh ulrich@ai-vm && cd ~/ul-fitness && docker compose up`), wöchentlicher Backup-Cron.
+- **P0 (done):** Subnet-Route `192.168.178.0/24` in LXC approved, `docker-compose.yml` in `~/ul-fitness` health.
+- **P1 (done):** Flyway V1+V2 (gyms + exercises.gym_id + workouts.gym_id + sets.is_warmup + exercise_aliases + workout_templates + category→VARCHAR), seed `Thomas Sport Center` / `All Inclusive Fitness` + Aliase + Maschinen aus Anhang 19, JWT (nur du, `ALLOW_REGISTER=false`), gym/exercise/workout/template CRUD. Deployed on ai-vm.
+- **P2 (in progress):** Compose Android app with Material3 dark theme. Completed: Login (JWT auth), Home (gym picker, start training, recent workouts list), ActiveWorkoutScreen (exercise picker, sets with reps/kg/RPE, rest timer, save flow), WorkoutDetailScreen (view + full edit mode with add/remove exercises/sets), ExerciseListScreen (CRUD per gym, search, category/kind/icon dropdowns, alias management), BottomBar navigation (Training + Übungen). Remaining: Progress charts (Vico), template CRUD UI, offline support.
+- **P3 (pending):** `SyncWorker`, `BuildConfig http://192.168.178.8:8080`, Offline-Banner.
+- **P4 (pending):** Vico Fortschritt + PRs mit Studio-Filter (Warmup/Bodyweight ausgeschlossen).
+- **P5 (pending):** LAN-only, `network_security_config.xml` für `http://192.168.178.8`, Signing, `AGENTS.md` Update, wöchentlicher Backup-Cron.
 
 ---
 
