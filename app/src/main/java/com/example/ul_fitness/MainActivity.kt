@@ -290,6 +290,7 @@ fun ActiveWorkoutScreen(
     var showRestTimer by remember { mutableStateOf(false) }
     var restSeconds by remember { mutableIntStateOf(90) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    var showSuccess by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
 
     LaunchedEffect(gymId) {
@@ -371,7 +372,12 @@ fun ActiveWorkoutScreen(
             onConfirm = {
                 showFinishDialog = false
                 isSaving = true
+                errorMsg = null
                 scope.launch {
+                    android.util.Log.d("Workout", "Saving workout: gym=$gymId exercises=${exercises.size}")
+                    exercises.forEach { ex ->
+                        android.util.Log.d("Workout", "  ${ex.name}: ${ex.sets.size} sets")
+                    }
                     val req = CreateWorkoutRequest(
                         gymId = gymId,
                         notes = notes.ifBlank { null },
@@ -391,11 +397,15 @@ fun ActiveWorkoutScreen(
                         }
                     )
                     val id = api.createWorkout(req)
+                    android.util.Log.d("Workout", "createWorkout result: id=$id")
                     if (id != null) {
-                        api.finishWorkout(id)
+                        val finished = api.finishWorkout(id)
+                        android.util.Log.d("Workout", "finishWorkout result: $finished")
+                        showSuccess = true
+                        kotlinx.coroutines.delay(1000)
                         onFinish(gymName, exercises.size)
                     } else {
-                        errorMsg = "Speichern fehlgeschlagen"
+                        errorMsg = "Speichern fehlgeschlagen — bitte erneut versuchen"
                         isSaving = false
                     }
                 }
@@ -574,7 +584,7 @@ fun ExerciseCard(
                     OutlinedTextField(
                         value = set.reps,
                         onValueChange = { onUpdateSet(setIdx) { copy(reps = it) } },
-                        modifier = Modifier.weight(1f).height(48.dp),
+                        modifier = Modifier.weight(1f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp)
@@ -583,7 +593,7 @@ fun ExerciseCard(
                     OutlinedTextField(
                         value = set.weightKg,
                         onValueChange = { onUpdateSet(setIdx) { copy(weightKg = it) } },
-                        modifier = Modifier.weight(1f).height(48.dp),
+                        modifier = Modifier.weight(1f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp)
@@ -592,7 +602,7 @@ fun ExerciseCard(
                     OutlinedTextField(
                         value = set.rpe,
                         onValueChange = { onUpdateSet(setIdx) { copy(rpe = it) } },
-                        modifier = Modifier.weight(0.7f).height(48.dp),
+                        modifier = Modifier.weight(0.7f),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 14.sp),
