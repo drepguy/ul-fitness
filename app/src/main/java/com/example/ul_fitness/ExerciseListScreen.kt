@@ -338,7 +338,13 @@ fun ExerciseEditDialog(
                             aliases = aliases
                         )
                         val ok = if (exercise != null) {
-                            api.updateExercise(exercise.id ?: 0, req)
+                            val saved = api.updateExercise(exercise.id ?: 0, req)
+                            if (saved) {
+                                val old = api.getAliases(exercise.id ?: 0)
+                                val toAdd = aliases.filter { it !in old }
+                                val toRemove = old.filter { it !in aliases }
+                                if (toAdd.isNotEmpty() || toRemove.isNotEmpty()) api.updateAliases(exercise.id ?: 0, toAdd, toRemove) else true
+                            } else false
                         } else {
                             api.createExercise(req) != null
                         }

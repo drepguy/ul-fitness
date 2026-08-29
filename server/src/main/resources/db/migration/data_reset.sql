@@ -36,7 +36,8 @@ INSERT INTO exercises (id, name, category, kind, gym_id, icon_key, is_system, ow
 (25, 'Trizeps Kabelzug',     'push',  'cable',      1, 'triceps',       TRUE, NULL, NOW(6)),
 (26, 'Bizeps Kabelzug',      'pull',  'cable',      1, 'bicep_curl',    TRUE, NULL, NOW(6)),
 (27, 'Rudern Brustgestützt', 'pull',  'machine',    1, 'row',           TRUE, NULL, NOW(6)),
-(28, 'Unterarme',            'other', 'free_weight', 1, 'dumbbell',     TRUE, NULL, NOW(6));
+(28, 'Unterarm-Innencurls',    'Unterarme', 'free_weight', 1, 'dumbbell',     TRUE, NULL, NOW(6));
+(29, 'Unterarm-Außencurls',    'Unterarme', 'free_weight', 1, 'dumbbell',     TRUE, NULL, NOW(6));
 
 -- Reset auto_increment
 ALTER TABLE exercises AUTO_INCREMENT = 29;
@@ -1371,9 +1372,9 @@ INSERT INTO sets (workout_exercise_id, set_no, reps, weight_kg, is_warmup, rpe, 
 (@weid, 1, 11, 7.50, FALSE, NULL, FALSE, NULL, NOW(6)),
 (@weid, 2, 11, 7.50, FALSE, NULL, FALSE, NULL, NOW(6));
 
--- 9. Unterarme
+-- 9. Unterarm-Innencurls
 INSERT INTO workout_exercises (workout_id, exercise_id, order_idx)
-VALUES (@wid, (SELECT id FROM exercises WHERE name = 'Unterarme' LIMIT 1), 8);
+VALUES (@wid, (SELECT id FROM exercises WHERE name = 'Unterarm-Innencurls' LIMIT 1), 8);
 SET @weid = LAST_INSERT_ID();
 INSERT INTO sets (workout_exercise_id, set_no, reps, weight_kg, is_warmup, rpe, is_failure, note, created_at) VALUES
 (@weid, 1, 11, 5.00, FALSE, NULL, FALSE, NULL, NOW(6)),
@@ -1464,9 +1465,9 @@ INSERT INTO sets (workout_exercise_id, set_no, reps, weight_kg, is_warmup, rpe, 
 (@weid, 1, 13, 10.00, FALSE, NULL, FALSE, NULL, NOW(6)),
 (@weid, 2, 12, 10.00, FALSE, NULL, FALSE, NULL, NOW(6));
 
--- 9. Unterarme
+-- 9. Unterarm-Innencurls
 INSERT INTO workout_exercises (workout_id, exercise_id, order_idx)
-VALUES (@wid, (SELECT id FROM exercises WHERE name = 'Unterarme' LIMIT 1), 8);
+VALUES (@wid, (SELECT id FROM exercises WHERE name = 'Unterarm-Innencurls' LIMIT 1), 8);
 SET @weid = LAST_INSERT_ID();
 INSERT INTO sets (workout_exercise_id, set_no, reps, weight_kg, is_warmup, rpe, is_failure, note, created_at) VALUES
 (@weid, 1, 10, 10.00, FALSE, NULL, FALSE, NULL, NOW(6)),
