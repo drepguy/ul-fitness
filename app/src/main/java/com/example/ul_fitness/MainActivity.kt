@@ -267,7 +267,9 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) {
         gyms = api.getGyms()
-        if (gyms.isNotEmpty()) recentWorkouts = api.getWorkouts(gyms.first().id ?: 1)
+        val all = mutableListOf<WorkoutSummaryDto>()
+        for (g in gyms) { all += api.getWorkouts(g.id ?: continue) }
+        recentWorkouts = all.sortedByDescending { it.startedAt }.take(20)
         isLoading = false
     }
 
