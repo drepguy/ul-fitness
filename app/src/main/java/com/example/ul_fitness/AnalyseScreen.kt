@@ -244,7 +244,7 @@ fun AnalyseScreen(
                                 "maxWeight" -> dailyData.map { it.maxWeight }
                                 else -> dailyData.map { it.e1RM }
                             }
-                            val chartDates = dailyData.map { it.date.take(5) }
+                            val chartDates = dailyData.map { it.date.drop(5).take(5) }
                             SimpleLineChart(
                                 values = values,
                                 dates = chartDates,
